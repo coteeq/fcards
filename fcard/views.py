@@ -278,7 +278,15 @@ def card_editor(deck, card=None):
             except (KeyError, ValueError):
                 abort(400, "Invalid card revision.")
         action = request.form.get("action", "save")
-        if action in ("add_front", "add_back"):
+        if action in ("verb_front", "verb_back"):
+            side = action.removeprefix("verb_")
+            descriptions = ("", "1sg", "1pl", "2sg", "2pl", "3sg", "3pl")
+            rows = forms[side]
+            forms[side] = [
+                (rows[index][0] if index < len(rows) else "", description)
+                for index, description in enumerate(descriptions)
+            ] + rows[len(descriptions):]
+        elif action in ("add_front", "add_back"):
             side = action.removeprefix("add_")
             if len(forms[side]) >= 100:
                 error = "A side can have at most 100 forms."

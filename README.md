@@ -92,9 +92,14 @@ The default database path is
 3. Use the quick-add form on a deck page to enter just Front and Back. Enter moves from
    Front to Back and submits from Back; mobile keyboards show Next/Done hints. Without
    JavaScript, use Tab and the Add button. For more detail, choose Add card or Edit card.
-   Use “Add another … form” or “Remove this form” to change rows without JavaScript.
+   Each form is one compact row: text, optional description, and a square trash button.
+   Use “Add another … form” or the trash button to change rows without JavaScript.
    The first remaining form on each side is canonical; each side must keep one form.
-   Blank extra rows are ignored. Each form can have a short description.
+   Blank extra rows are ignored. Each form can have a short description. The Verb
+   shortcut on either side prefills an undescribed infinitive row followed by `1sg`,
+   `1pl`, `2sg`, `2pl`, `3sg`, `3pl`. It keeps entered text and any rows beyond those
+   seven; applying it again does not duplicate rows. Fill in or remove the conjugation
+   rows before saving.
 4. Optional metadata creates a third question. Every card always has front → back and
    back → front questions, each scheduled independently.
 5. Type an answer and check it. Unicode case folding is the only normalization:

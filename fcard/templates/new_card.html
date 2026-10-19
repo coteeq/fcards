@@ -12,15 +12,21 @@
   <section class="card">
     <h3 class="card-header">{{ side | title }}</h3>
     <div class="card-body">
+      <div class="tab-toolbar">
+        <button name="action" value="verb_{{ side }}" formnovalidate title="Keep entered text; set the first seven descriptions to infinitive (blank), 1sg, 1pl, 2sg, 2pl, 3sg, 3pl">prefill as verb</button>
+      </div>
       {% for text, description in forms[side] %}
-      <fieldset>
-        <legend>Form {{ loop.index }}{% if loop.first %} · canonical{% endif %}</legend>
-        <label for="{{ side }}-text-{{ loop.index }}">Text</label>
-        <input id="{{ side }}-text-{{ loop.index }}" name="{{ side }}_text" value="{{ text }}" maxlength="500" {% if loop.first %}required{% endif %}>
-        <label for="{{ side }}-description-{{ loop.index }}">Short description <span class="muted">(optional)</span></label>
-        <input id="{{ side }}-description-{{ loop.index }}" name="{{ side }}_description" value="{{ description }}" maxlength="160" placeholder="e.g. nominative singular, past tense">
-        <button name="action" value="remove_{{ side }}_{{ loop.index0 }}" formnovalidate {% if forms[side] | length == 1 %}disabled{% endif %}>Remove this form</button>
-      </fieldset>
+      <div class="form-editor-row" role="group" aria-label="{{ side | title }} form {{ loop.index }}{% if loop.first %} (canonical){% endif %}">
+        <label class="sr-only" for="{{ side }}-text-{{ loop.index }}">{{ side | title }} form {{ loop.index }} text{% if loop.first %} (canonical){% endif %}</label>
+        <input id="{{ side }}-text-{{ loop.index }}" name="{{ side }}_text" value="{{ text }}" maxlength="500" placeholder="{{ 'Text (canonical)' if loop.first else 'Text' }}" {% if loop.first %}required{% endif %}>
+        <label class="sr-only" for="{{ side }}-description-{{ loop.index }}">{{ side | title }} form {{ loop.index }} description (optional)</label>
+        <input id="{{ side }}-description-{{ loop.index }}" name="{{ side }}_description" value="{{ description }}" maxlength="160" placeholder="Description (optional)">
+        <button class="form-remove" name="action" value="remove_{{ side }}_{{ loop.index0 }}" formnovalidate aria-label="Remove {{ side }} form {{ loop.index }}" title="{{ 'Each side must keep one form' if forms[side] | length == 1 else 'Remove this form' }}" {% if forms[side] | length == 1 %}disabled{% endif %}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>
+          </svg>
+        </button>
+      </div>
       {% endfor %}
       <button name="action" value="add_{{ side }}" formnovalidate>Add another {{ side }} form</button>
     </div>

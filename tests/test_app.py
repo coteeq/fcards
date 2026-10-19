@@ -174,6 +174,111 @@ class AppTest(unittest.TestCase):
         self.assertEqual(rows, [{"text": "gehen", "position": 0},
                                 {"text": "ging", "position": 1}])
 
+    def test_verb_shortcut_prefills_seven_rows_without_saving(self):
+        path = f"/decks/{self.deck_name}/cards/new"
+        page = self.client.get(path).get_data(as_text=True)
+        self.assertIn('value="verb_front" formnovalidate', page)
+        self.assertIn('value="verb_back" formnovalidate', page)
+        for side in ("front", "back"):
+            data = {
+                "front_text": [""], "front_description": [""],
+                "back_text": [""], "back_description": [""],
+                "meta": "irregular", "action": f"verb_{side}",
+            }
+            response = self.post(path, data)
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            descriptions = re.findall(fr'name="{side}_description" value="([^"]*)"', html)
+            self.assertEqual(descriptions, ["", "1sg", "1pl", "2sg", "2pl", "3sg", "3pl"])
+            self.assertEqual(html.count(f'name="{side}_text"'), 7)
+            other = "back" if side == "front" else "front"
+            self.assertEqual(html.count(f'name="{other}_text"'), 1)
+            self.assertIn(">irregular</textarea>", html)
+        self.assertEqual(len(self.rows("SELECT * FROM cards")), 1)
+
+    def test_verb_shortcut_keeps_text_and_extra_rows_and_is_repeatable(self):
+        texts = ["gehen", "gehe", "gehen", "gehst", "geht", "geht", "gehen", "ging"]
+        data = {
+            "front_text": texts, "front_description": ["old"] * 7 + ["past"],
+            "back_text": ["go"], "back_description": ["verb"],
+            "meta": "irregular", "action": "verb_front",
+        }
+        response = self.post(self.edit_url, {**data, "revision": "0"})
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertEqual(re.findall(r'name="front_text" value="([^"]*)"', html), texts)
+        descriptions = re.findall(r'name="front_description" value="([^"]*)"', html)
+        self.assertEqual(descriptions, ["", "1sg", "1pl", "2sg", "2pl", "3sg", "3pl", "past"])
+        self.assertIn('name="back_text" value="go"', html)
+        self.assertIn('name="back_description" value="verb"', html)
+        self.assertIn('name="revision" value="0"', html)
+        repeat = self.post(self.edit_url, {
+            **data, "revision": "0", "front_description": descriptions,
+        })
+        self.assertEqual(repeat.status_code, 200)
+        self.assertEqual(repeat.data, response.data)
+        self.assertEqual(self.rows("SELECT revision FROM cards")[0]["revision"], 0)
+        self.assertEqual(len(self.rows("SELECT * FROM card_forms")), 3)
+
+    def test_verb_forms_save_in_order_and_leave_first_canonical(self):
+        descriptions = ["", "1sg", "1pl", "2sg", "2pl", "3sg", "3pl"]
+        texts = ["gehen", "gehe", "gehen", "gehst", "geht", "geht", "gehen"]
+        response = self.post(f"/decks/{self.deck_name}/cards/new", {
+            "front_text": texts, "front_description": descriptions,
+            "back_text": ["go"], "back_description": [""], "action": "save",
+        })
+        self.assertEqual(response.status_code, 302)
+        rows = self.rows(
+            "SELECT text, description, position FROM card_forms "
+            "WHERE card_id = 2 AND side = 'front' ORDER BY position"
+        )
+        self.assertEqual(rows, [
+            {"text": text, "description": desc, "position": i}
+            for i, (text, desc) in enumerate(zip(texts, descriptions))
+        ])
+        self.assertEqual(len(self.rows("SELECT * FROM questions WHERE card_id=2")), 2)
+        with self.app.app_context():
+            qid = get_db().execute(
+                "SELECT id FROM questions WHERE card_id=2 AND kind='front_to_back'"
+            ).fetchone()[0]
+            self.assertEqual(question_data(qid, self.deck_name)["prompt"], "gehen")
+
+    def test_form_editor_has_two_inputs_and_icon_remove_per_row(self):
+        for path in (f"/decks/{self.deck_name}/cards/new", self.edit_url):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            rows = re.findall(
+                r'<div class="form-editor-row"[^>]*>(.*?)</div>', html, re.S,
+            )
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(row.count("<input "), 2)
+                self.assertEqual(row.count('<button class="form-remove"'), 1)
+                self.assertEqual(row.count('class="sr-only"'), 2)
+                self.assertIn('aria-label="Remove ', row)
+                self.assertIn('formnovalidate', row)
+                self.assertIn('<svg width="14" height="14"', row)
+                self.assertIn('aria-hidden="true"', row)
+                self.assertNotIn(">Remove this form</button>", row)
+            self.assertNotIn("<fieldset", html)
+
+    def test_trash_button_is_disabled_only_for_single_form_side(self):
+        html = self.client.get(self.edit_url).get_data(as_text=True)
+        buttons = re.findall(r'<button class="form-remove"([^>]*)>', html)
+        self.assertEqual(len(buttons), 3)
+        for button in buttons:
+            if 'value="remove_back_0"' in button:
+                self.assertIn("disabled", button)
+            else:
+                self.assertNotIn("disabled", button)
+        self.assertEqual(self.post(self.edit_url, self.edit_payload(
+            action="remove_front_1",
+        )).status_code, 200)
+        self.assertEqual(self.post(self.edit_url, self.edit_payload(
+            action="remove_back_0",
+        )).status_code, 400)
+
     def test_validation_is_atomic(self):
         path = f"/decks/{self.deck_name}/cards/new"
         valid = {"front_text": ["x"], "front_description": [""],
