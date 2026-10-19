@@ -1,8 +1,8 @@
 # fcard
 
-A server-rendered Flask + SQLite flashcard app with username-only login. A small
-vanilla JavaScript handler makes Enter advance/submit the quick-add form; all other
-controls work without JavaScript. The visual design and base stylesheet come from the
+A server-rendered Flask + SQLite flashcard app with username-only login. Small vanilla
+JavaScript handlers make Enter advance/submit quick-add and check study answers.
+All controls also work without JavaScript using their buttons. The visual design and base stylesheet come from the
 sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
 
 ## Run
@@ -70,10 +70,15 @@ the database and its WAL files). Keep `instance/` out of publicly served directo
    back → front questions, each scheduled independently.
 5. Type an answer and check it. Unicode case folding is the only normalization:
    spaces, accents, and punctuation still matter. Only the canonical first form is
-   automatically accepted. All forms and both sides are then revealed.
-6. Keep or correct the verdict and advance. Advancing finalizes exactly one review.
-   Pausing or leaving before advancing does not count that unfinished question.
-   Empty answers are incorrect, but can also be manually corrected.
+   automatically accepted. Enter checks the answer; Shift+Enter inserts a newline.
+   All forms and both sides are then revealed.
+6. The Finalize review card is collapsed by default. Open it to correct the verdict
+   or adjust the scheduler; Next question stays outside and is focused after reveal,
+   so Enter advances. Advancing finalizes exactly one review. Empty answers are
+   incorrect, but can also be manually corrected.
+   Closing the tab or navigating away before advancing counts nothing and keeps the
+   pending question for resumption. “Discard question and return to deck” also counts
+   nothing, but explicitly clears that pending question.
 7. Review history shows the automatic verdict, final rating, and state transition.
    Raw answers are not stored in that history.
 
@@ -143,4 +148,5 @@ The optional keyboard-handler checks use Node's built-in assertions (no npm pack
 
 ```sh
 node tests/test_quick_add.cjs
+node tests/test_study_keyboard.cjs
 ```

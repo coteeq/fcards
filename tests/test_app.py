@@ -580,6 +580,43 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.post("/logout").status_code, 302)
         self.assertNotIn("user_id", self.session())
 
+    def test_study_enter_handler_is_external_and_scoped(self):
+        response = self.start()
+        self.assertIn(b'data-study-answer', response.data)
+        self.assertIn(b'enterkeyhint="done"', response.data)
+        self.assertIn(b'src="/static/study.js" defer', response.data)
+        self.assertNotIn(b"study.js", self.client.get("/").data)
+        with self.client.get("/static/study.js") as script:
+            self.assertEqual(script.status_code, 200)
+
+    def test_finalize_card_is_collapsed_and_next_is_outside(self):
+        self.start()
+        response = self.answer("bread")
+        html = response.get_data(as_text=True)
+        details = re.search(r'<details class="card">(.*?)</details>', html, re.S)
+        self.assertIsNotNone(details)
+        self.assertIn("Finalize review", details.group(1))
+        self.assertIn('name="rating"', details.group(1))
+        self.assertIn('name="control"', details.group(1))
+        self.assertNotIn("<details", details.group(1))
+        self.assertNotIn("<button", details.group(1))
+        self.assertRegex(html[details.end():], r'<button class="primary" autofocus>Next question')
+        self.assertEqual(self.finish().status_code, 302)
+        self.assertEqual(self.rows("SELECT rating FROM review_log")[0]["rating"], "correct")
+
+    def test_leaving_study_keeps_pending_but_discard_clears_it(self):
+        self.start()
+        self.answer("bread")
+        before = self.pending()
+        self.client.get(f"/decks/{self.deck_name}")
+        self.assertEqual(self.pending(), before)
+        self.assertIn(b"Expected answer", self.start().data)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+        response = self.post(self.study_url + "/pause", {"attempt": before["token"]})
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("study", self.session())
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})
         with new_app.app_context():

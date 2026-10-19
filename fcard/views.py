@@ -475,7 +475,7 @@ def pause(deck_name):
     require_deck(deck_name)
     current_pending(deck_name)
     session.pop("study", None)
-    flash("Study paused. The unfinished question was not counted.")
+    flash("Question discarded. The unfinished review was not counted.")
     return redirect(url_for("web.deck_detail", deck_name=deck_name))
 
 

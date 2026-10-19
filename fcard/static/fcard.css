@@ -77,6 +77,8 @@ details { margin: 0.8rem 0; }
 details label { margin-top: 0.8rem; }
 summary { cursor: pointer; color: var(--text-muted); }
 .tab-toolbar { align-items: center; }
+.study-leave { margin-top: var(--gap); }
+summary.card-header { color: var(--text-muted); }
 @media (prefers-color-scheme: dark) {
   :root[data-theme=system] .error { color: #ff8866; background: #2a1a14; border-color: #5a2a1a; }
 }

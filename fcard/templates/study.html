@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import csrf, sides with context %}
 {% block title %}Study · {{ deck.name }} · fcard{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='study.js') }}" defer></script>{% endblock %}
 {% block content %}
 <h2 class="page-title">{{ deck.name }}</h2>
 {% if pending %}
@@ -13,8 +14,8 @@
       {{ csrf() }}
       <input type="hidden" name="attempt" value="{{ pending.token }}">
       <label for="answer">Your {{ 'metadata' if data.question.kind == 'meta' else ('front' if data.question.kind == 'back_to_front' else 'back') }} answer</label>
-      <textarea id="answer" name="answer" rows="2" maxlength="500" autofocus autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
-      <p class="muted">Exact match, ignoring case only. You can correct the verdict after reveal. An empty answer counts as incorrect.</p>
+      <textarea id="answer" data-study-answer name="answer" rows="2" maxlength="500" autofocus enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <p class="muted">Exact match, ignoring case only. Enter checks the answer; Shift+Enter adds a newline. You can correct the verdict after reveal. An empty answer counts as incorrect.</p>
       <button class="primary">Check answer</button>
     </form>
     {% else %}
@@ -27,13 +28,15 @@
   </div>
   {% if 'answer' in pending %}
   {{ sides(data.forms, data.question.meta) }}
+  {% endif %}
 </section>
-<section class="card">
-  <h3 class="card-header">Finalize review</h3>
-  <div class="card-body">
-    <form method="post" action="{{ url_for('web.finish', deck_name=deck.name) }}">
-      {{ csrf() }}
-      <input type="hidden" name="attempt" value="{{ pending.token }}">
+{% if 'answer' in pending %}
+<form method="post" action="{{ url_for('web.finish', deck_name=deck.name) }}">
+  {{ csrf() }}
+  <input type="hidden" name="attempt" value="{{ pending.token }}">
+  <details class="card">
+    <summary class="card-header">Finalize review</summary>
+    <div class="card-body">
       <fieldset>
         <legend>Keep or correct the verdict</legend>
         {% for rating in scheduler.ratings %}
@@ -41,25 +44,22 @@
         {% endfor %}
       </fieldset>
       {% if scheduler.controls %}
-      <details>
-        <summary>Scheduler controls (optional)</summary>
-        <label for="control">Extra adjustment after applying the verdict</label>
-        <select id="control" name="control">
-          <option value="">No extra adjustment</option>
-          {% for control in scheduler.controls %}<option value="{{ control.value }}">{{ control.label }}</option>{% endfor %}
-        </select>
-      </details>
+      <label for="control">Extra adjustment after applying the verdict</label>
+      <select id="control" name="control">
+        <option value="">No extra adjustment</option>
+        {% for control in scheduler.controls %}<option value="{{ control.value }}">{{ control.label }}</option>{% endfor %}
+      </select>
       {% endif %}
-      <p class="muted">“Next question” counts this review once. Pausing without advancing does not count it.</p>
-      <button class="primary">Next question →</button>
-    </form>
-  </div>
-  {% endif %}
-</section>
-<form method="post" action="{{ url_for('web.pause', deck_name=deck.name) }}">
+      <p class="muted">“Next question” counts this review once. Leaving without advancing does not count it.</p>
+    </div>
+  </details>
+  <button class="primary" autofocus>Next question →</button>
+</form>
+{% endif %}
+<form class="study-leave" method="post" action="{{ url_for('web.pause', deck_name=deck.name) }}">
   {{ csrf() }}
   <input type="hidden" name="attempt" value="{{ pending.token }}">
-  <button>Pause without counting this question</button>
+  <button>Discard question and return to deck</button>
 </form>
 {% else %}
 <section class="card">
