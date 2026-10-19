@@ -34,8 +34,13 @@ p { line-height: 1.45; overflow-wrap: anywhere; }
 .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 .user-menu { position: relative; margin: 0; }
+header .tab, .user-menu > summary {
+  font-family: var(--font);
+  font-size: 0.85rem;
+  line-height: 1.25;
+  padding: 0.3rem 0.75rem;
+}
 .user-menu > summary {
-  padding: 0.4rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
