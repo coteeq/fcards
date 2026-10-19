@@ -1,6 +1,5 @@
 /* fcard additions to the sibling cgi application's MIT-licensed stylesheet. */
 a { color: var(--accent); text-underline-offset: 0.15em; }
-.brand { color: var(--text); text-decoration: none; }
 .tab, .button { text-decoration: none; display: inline-block; }
 button, .button, input, textarea, select {
   font: inherit;
@@ -32,8 +31,35 @@ input[type=radio] { accent-color: var(--accent); }
 p { line-height: 1.45; overflow-wrap: anywhere; }
 .card-body > p { margin-bottom: 0.8rem; }
 .muted { color: var(--text-muted); font-size: 0.9rem; }
-.account, .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
-.account { justify-content: space-between; margin-bottom: var(--gap); font-size: 0.85rem; }
+.actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.user-menu { position: relative; margin: 0; }
+.user-menu > summary {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  max-width: 16rem;
+  overflow-wrap: anywhere;
+}
+.user-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 10;
+  width: 11rem;
+  padding: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 0.3rem 0.8rem #0002;
+}
+.user-menu-panel button { display: block; width: 100%; text-align: left; }
+.user-menu-panel button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
+.user-menu-panel form + form { border-top: 1px solid var(--border); padding-top: 0.4rem; margin-top: 0.4rem; }
+.quick-add { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
+.quick-add > div { flex: 1 1 10rem; min-width: 0; }
+.quick-add input:not([type=hidden]) { margin-bottom: 0; }
 .page-title { font-size: 1.15rem; margin-bottom: 0.8rem; overflow-wrap: anywhere; }
 .intro { margin-bottom: var(--gap); }
 .notice { padding: 0.75rem 1rem; border: 1px solid var(--border); background: var(--label-bg); margin-bottom: var(--gap); }

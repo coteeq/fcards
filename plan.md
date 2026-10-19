@@ -4,20 +4,24 @@
 
 - **users**: `id`, unique case-sensitive `username`, `created_at`. A username is an
   identity, not a security credential. No passwords.
-- **decks**: `id`, unique `name`, `description`, `author_id` (FK to users),
-  `created_at`. The author is the user who created the deck, not an access restriction.
+- **decks**: `name` (text primary key), `description`, `author_id` (FK to users),
+  `created_at`. Names match `[A-Za-z_][A-Za-z0-9_]*` (ASCII, max 120 characters).
+  There is no numeric deck ID: foreign keys and URLs use the case-sensitive name.
+  The author is the user who created the deck, not an access restriction.
   Every deck is visible to every user. No membership/enrollment table is needed:
   opening a deck is sufficient. Author attribution is required and does not change
   when another user adds cards.
-- **cards**: `id`, `deck_id` (FK), `meta` (optional free text), `created_at`.
+- **cards**: `id`, `deck_name` (FK to decks.name), `revision` (nonnegative integer),
+  `meta` (optional free text), `created_at`. Revision starts at 0 and increments on
+  every edit, independently of per-user progress revisions.
   A card belongs to one deck in this MVP; duplicate content is allowed. Its sides are
   opaque **front** and **back**, with no source/target language semantics. Side text
   lives in ordered forms, not duplicated columns on the card.
 - **card_forms**: `id`, `card_id` (FK), `side` (`front` or `back`), `position`
   (zero-based within the side), `text`, `description`. Unique
   `(card_id, side, position)`. Each side must have at least one form, enforced by the
-  card-creation transaction. Supporting forms symmetrically avoids privileging either
-  side; a side with no variants simply has one form.
+  card creation/edit transaction. Symmetric forms avoid privileging either side; a side
+  with no variants simply has one form.
 - The first form on a side is the one with the smallest position, never the smallest
   spelling or row ID. It is that side's canonical display/prompt/expected answer.
   Other forms and their descriptions are shown after answering. Descriptions are short
@@ -52,7 +56,8 @@
   before finalization does not count a review. Post-finalization corrections are outside
   the MVP; they would require replaying subsequent scheduler transitions.
 - Pending answer state is session-scoped: question ID, captured progress revision,
-  submitted answer, automatic verdict, and reveal status. It is not review history.
+  captured card revision, submitted answer, automatic verdict, and reveal status.
+  It is not review history.
   The server recomputes the automatic verdict rather than trusting a submitted verdict.
   Finalization permits only the original verdict or an explicit user correction.
 
@@ -116,27 +121,38 @@
   scheduler evaluation and migrations; raw submitted answers are not retained in logs.
 - Grade transactions serialize writers and compare the progress review count to the
   revision captured when the question was selected (zero for unseen questions). A
-  stale/replayed submission cannot advance progress twice. Session state binds the
-  selection to the current user and requires an answer/reveal before finalization.
+  stale/replayed submission cannot advance progress twice. The card revision is also
+  checked inside this transaction so edits cannot silently change an active question.
+  Session state binds selection to the current user and requires answer/reveal before
+  finalization.
 
 ## Integrity and lifecycle
 
 SQLite foreign keys are enabled on every connection. Vocabulary and progress writes are
 transactional. Deck → cards → forms/questions → progress/log foreign keys cascade on
 deletion, as do user → progress/log. Deck author deletion is restricted so attribution
-cannot disappear; the MVP does not expose destructive operations. Unique/check
-constraints cover identities, sides, form order, question kinds, nonblank required text,
+cannot disappear; user/deck/whole-card deletion is not exposed. Unique/check constraints
+cover identities, sides, form order, question kinds, nonblank required text,
 and nonnegative counters. Indexes cover deck cards, question lookup, user due queues,
 and review history. At-least-one-form-per-side and optional-meta-question rules span
 tables and are enforced at the application write boundary.
 
-The MVP supports creation and browsing, not editing. Future edits should preserve
-card/question IDs and progress, replace/reorder forms atomically, and add/remove the
-metadata question deliberately (removal also removes its progress/history under current
-cascades). Reusing a card in several decks would require a deck-card join table and an
-explicit decision whether progress is shared across those decks; currently each deck's
-card is independent.
+Card editing preserves the card ID and all remaining question IDs/progress. Forms are
+replaced atomically in their submitted order; removing the first promotes the next.
+At least one form on each side remains mandatory. Blank metadata deletes its question
+and cascades to that question's progress/history for every user. Adding metadata creates
+its question if absent; changing nonblank metadata preserves that question's progress.
+Edits compare the submitted card revision before incrementing it, rejecting stale saves.
+Form IDs are not progression identities and can change on save. Existing review logs
+retain scheduling state, not historical side text; history displays current card text.
 
-Schema evolution uses SQLite `user_version` (initial version 1); unknown newer versions
-are rejected rather than silently mutated. A future schema change needs an explicit
-migration.
+Quick creation uses the same card-creation transaction with one form per side, empty
+form descriptions, and no metadata, yielding exactly two questions. It needs no separate
+table or data model. Reusing a card in several decks would require a deck-card join
+table and an explicit decision whether progress is shared across decks; currently each
+deck's card is independent.
+
+Schema evolution uses SQLite `user_version` (current version 2). A fresh database is
+required for this revision; no compatibility shims or migration from version 1 are
+provided. Other versions are rejected rather than silently mutated. Future schema
+changes need an explicit migration or an explicitly chosen fresh start.

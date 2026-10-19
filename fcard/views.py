@@ -65,7 +65,7 @@ def response_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'none'; style-src 'self' https://fonts.googleapis.com; "
+        "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; base-uri 'none'; "
         "form-action 'self'; frame-ancestors 'none'"
     )
@@ -114,9 +114,10 @@ def logout():
 
 @bp.post("/theme")
 def theme():
-    choices = ("system", "light", "dark")
-    current = session.get("theme", "system")
-    session["theme"] = choices[(choices.index(current) + 1) % len(choices)]
+    selected = request.form.get("theme")
+    if selected not in {"system", "light", "dark"}:
+        abort(400, "Unknown theme.")
+    session["theme"] = selected
     # Only local paths, never arbitrary referrer URLs.
     target = request.form.get("return_to", "/")
     if (not target.startswith("/") or target.startswith("//") or "\\" in target
@@ -130,41 +131,43 @@ def theme():
 def index():
     decks = get_db().execute(
         """SELECT d.*, u.username AS author,
-                  (SELECT COUNT(*) FROM cards c WHERE c.deck_id = d.id) AS card_count,
+                  (SELECT COUNT(*) FROM cards c WHERE c.deck_name = d.name) AS card_count,
                   (SELECT COUNT(*) FROM questions q JOIN cards c ON c.id = q.card_id
-                   WHERE c.deck_id = d.id) AS question_count,
+                   WHERE c.deck_name = d.name) AS question_count,
                   (SELECT COUNT(*) FROM progress p
                    JOIN questions q ON q.id = p.question_id
                    JOIN cards c ON c.id = q.card_id
-                   WHERE c.deck_id = d.id AND p.user_id = ?) AS seen_count
-           FROM decks d JOIN users u ON u.id = d.author_id ORDER BY d.id DESC""",
+                   WHERE c.deck_name = d.name AND p.user_id = ?) AS seen_count
+           FROM decks d JOIN users u ON u.id = d.author_id ORDER BY d.created_at DESC, d.name""",
         (g.user["id"],),
     ).fetchall()
     return render_template("index.html", decks=decks)
 
 
-@bp.route("/decks/new", methods=("GET", "POST"))
+@bp.route("/new-deck", methods=("GET", "POST"))
 @login_required
 def new_deck():
     error = None
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
+        name = request.form.get("name", "")
         description = request.form.get("description", "").strip()
-        if not 1 <= len(name) <= 120 or len(description) > 2000:
-            error = "Use a name of 1–120 characters and a description up to 2000 characters."
+        if not models.valid_deck_name(name):
+            error = "Use a C-style identifier: [A-Za-z_][A-Za-z0-9_]* (max 120 characters)."
+        elif len(description) > 2000:
+            error = "Description must be at most 2000 characters."
         else:
             try:
-                deck_id = models.create_deck(name, description, g.user["id"])
+                deck_name = models.create_deck(name, description, g.user["id"])
             except sqlite3.IntegrityError:
                 error = "A deck with this name already exists."
             else:
                 flash("Deck created. Add its first card.")
-                return redirect(url_for("web.new_card", deck_id=deck_id))
+                return redirect(url_for("web.new_card", deck_name=deck_name))
     return render_template("new_deck.html", error=error), (400 if error else 200)
 
 
-def require_deck(deck_id):
-    deck = models.deck_or_none(deck_id)
+def require_deck(deck_name):
+    deck = models.deck_or_none(deck_name)
     if deck is None:
         abort(404, "Deck not found.")
     return deck
@@ -180,27 +183,47 @@ def page_number():
     return page
 
 
-@bp.get("/decks/<int:deck_id>")
+@bp.get("/decks/<deck_name>")
 @login_required
-def deck_detail(deck_id):
-    deck = require_deck(deck_id)
+def deck_detail(deck_name):
+    return render_deck(require_deck(deck_name))
+
+
+def render_deck(deck, quick_error=None):
     page = page_number()
     cards = get_db().execute(
         """SELECT c.*, COUNT(q.id) AS question_count,
                   COUNT(p.question_id) AS seen_count
            FROM cards c JOIN questions q ON q.card_id = c.id
            LEFT JOIN progress p ON p.question_id = q.id AND p.user_id = ?
-           WHERE c.deck_id = ? GROUP BY c.id ORDER BY c.id
+           WHERE c.deck_name = ? GROUP BY c.id ORDER BY c.id DESC
            LIMIT 21 OFFSET ?""",
-        (g.user["id"], deck_id, (page - 1) * 20),
+        (g.user["id"], deck["name"], (page - 1) * 20),
     ).fetchall()
     more = len(cards) > 20
     cards = cards[:20]
     forms = models.forms_for_cards([card["id"] for card in cards])
     return render_template(
         "deck.html", deck=deck, cards=cards, forms=forms,
-        stats=models.deck_stats(deck_id, g.user["id"]), page=page, more=more,
-    )
+        stats=models.deck_stats(deck["name"], g.user["id"]), page=page, more=more,
+        quick_error=quick_error,
+    ), (400 if quick_error else 200)
+
+
+@bp.post("/decks/<deck_name>/cards/quick")
+@login_required
+def quick_card(deck_name):
+    deck = require_deck(deck_name)
+    forms = {
+        "front": [(request.form.get("front", ""), "")],
+        "back": [(request.form.get("back", ""), "")],
+    }
+    try:
+        models.create_card(deck_name, forms, "")
+    except ValueError as exc:
+        return render_deck(deck, quick_error=str(exc))
+    flash("Card added.")
+    return redirect(url_for("web.deck_detail", deck_name=deck_name))
 
 
 def read_forms():
@@ -214,16 +237,46 @@ def read_forms():
     return forms
 
 
-@bp.route("/decks/<int:deck_id>/cards/new", methods=("GET", "POST"))
+@bp.route("/decks/<deck_name>/cards/new", methods=("GET", "POST"))
 @login_required
-def new_card(deck_id):
-    deck = require_deck(deck_id)
+def new_card(deck_name):
+    return card_editor(require_deck(deck_name))
+
+
+@bp.route("/decks/<deck_name>/cards/<int:card_id>/edit", methods=("GET", "POST"))
+@login_required
+def edit_card(deck_name, card_id):
+    deck = require_deck(deck_name)
+    card = models.card_or_none(deck_name, card_id)
+    if card is None:
+        abort(404, "Card not found in this deck.")
+    return card_editor(deck, card)
+
+
+def card_editor(deck, card=None):
+    editing = card is not None
     forms = {"front": [("", "")], "back": [("", "")]}
     meta = ""
+    revision = None
+    if editing:
+        saved = models.forms_for_cards([card["id"]])[card["id"]]
+        forms = {
+            side: [(row["text"], row["description"]) for row in rows]
+            for side, rows in saved.items()
+        }
+        meta = card["meta"]
+        revision = card["revision"]
     error = None
     if request.method == "POST":
         forms = read_forms()
         meta = request.form.get("meta", "")
+        if editing:
+            try:
+                revision = int(request.form["revision"])
+                if not 0 <= revision < 2**63 - 1:
+                    raise ValueError
+            except (KeyError, ValueError):
+                abort(400, "Invalid card revision.")
         action = request.form.get("action", "save")
         if action in ("add_front", "add_back"):
             side = action.removeprefix("add_")
@@ -231,30 +284,58 @@ def new_card(deck_id):
                 error = "A side can have at most 100 forms."
             else:
                 forms[side].append(("", ""))
+        elif action.startswith("remove_"):
+            parts = action.split("_")
+            if len(parts) != 3 or parts[1] not in forms:
+                abort(400, "Invalid form removal.")
+            try:
+                side, index = parts[1], int(parts[2])
+            except ValueError:
+                abort(400, "Invalid form index.")
+            if not 0 <= index < len(forms[side]):
+                abort(400, "Invalid form index.")
+            if len(forms[side]) == 1:
+                error = "Each side must keep at least one form."
+            else:
+                forms[side].pop(index)
         elif action == "save":
             if any(not forms[side][0][0].strip() for side in forms):
                 error = "The first form on each side is required."
             elif any(not text.strip() and desc.strip()
                      for rows in forms.values() for text, desc in rows):
                 error = "A description needs form text."
-            elif len(meta) > 500:
-                error = "Metadata must be at most 500 characters."
             else:
                 cleaned = {
                     side: [(text, desc) for text, desc in rows if text.strip()]
                     for side, rows in forms.items()
                 }
                 try:
-                    models.create_card(deck_id, cleaned, meta)
+                    if editing:
+                        models.update_card(
+                            deck["name"], card["id"], cleaned, meta, revision,
+                        )
+                        card_id = card["id"]
+                    else:
+                        card_id = models.create_card(deck["name"], cleaned, meta)
                 except ValueError as exc:
                     error = str(exc)
+                except models.CardConflict as exc:
+                    abort(409, str(exc))
                 else:
-                    flash("Card added, with independent questions for each direction.")
-                    return redirect(url_for("web.deck_detail", deck_id=deck_id))
+                    flash("Card updated." if editing else "Card added.")
+                    newer = get_db().execute(
+                        "SELECT COUNT(*) FROM cards WHERE deck_name = ? AND id > ?",
+                        (deck["name"], card_id),
+                    ).fetchone()[0]
+                    return redirect(url_for(
+                        "web.deck_detail", deck_name=deck["name"],
+                        page=newer // 20 + 1, _anchor=f"card-{card_id}",
+                    ))
         else:
             abort(400, "Unknown form action.")
     return render_template(
-        "new_card.html", deck=deck, forms=forms, meta=meta, error=error,
+        "new_card.html", deck=deck, card=card, forms=forms, meta=meta,
+        revision=revision, error=error,
     ), (400 if error else 200)
 
 
@@ -265,9 +346,9 @@ def scheduler_for(algorithm):
     return scheduler
 
 
-def current_pending(deck_id, require_answer=False):
+def current_pending(deck_name, require_answer=False):
     pending = session.get("study")
-    if (not pending or pending["deck_id"] != deck_id
+    if (not pending or pending["deck_name"] != deck_name
             or pending["user_id"] != g.user["id"]):
         abort(409, "This question is no longer active. Open Study again.")
     token = request.form.get("attempt", "")
@@ -278,26 +359,28 @@ def current_pending(deck_id, require_answer=False):
     return pending
 
 
-@bp.get("/decks/<int:deck_id>/study")
+@bp.get("/decks/<deck_name>/study")
 @login_required
-def study(deck_id):
-    deck = require_deck(deck_id)
+def study(deck_name):
+    deck = require_deck(deck_name)
     pending = session.get("study")
-    if pending and (pending["deck_id"] != deck_id or pending["user_id"] != g.user["id"]):
+    if pending and (pending["deck_name"] != deck_name or pending["user_id"] != g.user["id"]):
         pending = None
     if pending:
         progress = get_db().execute(
             "SELECT reviews FROM progress WHERE user_id = ? AND question_id = ?",
             (g.user["id"], pending["question_id"]),
         ).fetchone()
-        if (progress["reviews"] if progress else 0) != pending["revision"]:
+        data = models.question_data(pending["question_id"], deck_name)
+        if (data is None or data["question"]["card_revision"] != pending["card_revision"]
+                or (progress["reviews"] if progress else 0) != pending["revision"]):
             pending = None
             session.pop("study", None)
-            flash("That question was already reviewed; selected a fresh question.")
+            flash("That question changed or was already reviewed; selected a fresh question.")
     if not pending:
         try:
             selected = reviews.select_question(
-                deck_id, g.user["id"], current_app.config["DEFAULT_ALGORITHM"],
+                deck_name, g.user["id"], current_app.config["DEFAULT_ALGORITHM"],
                 current_app.config["SCHEDULERS"], int(time.time()),
                 session.get("queue", {}),
             )
@@ -306,13 +389,17 @@ def study(deck_id):
         if selected is None:
             session.pop("study", None)
             return render_template("study.html", deck=deck, pending=None)
+        data = models.question_data(selected.question_id, deck_name)
+        if data is None:
+            abort(409, "This question no longer exists. Reload Study.")
         pending = {
-            "deck_id": deck_id, "user_id": g.user["id"],
+            "deck_name": deck_name, "user_id": g.user["id"],
             "question_id": selected.question_id, "revision": selected.reviews,
+            "card_revision": data["question"]["card_revision"],
             "algorithm": selected.algorithm, "token": secrets.token_urlsafe(24),
         }
         session["study"] = pending
-    data = models.question_data(pending["question_id"], deck_id)
+    data = models.question_data(pending["question_id"], deck_name)
     if data is None:
         session.pop("study", None)
         abort(409, "This question no longer exists.")
@@ -325,11 +412,19 @@ def study(deck_id):
     )
 
 
-@bp.post("/decks/<int:deck_id>/study/answer")
+def data_for_pending(pending, deck_name):
+    data = models.question_data(pending["question_id"], deck_name)
+    if data is None or data["question"]["card_revision"] != pending["card_revision"]:
+        session.pop("study", None)
+        abort(409, "This card was edited. Open Study again before answering.")
+    return data
+
+
+@bp.post("/decks/<deck_name>/study/answer")
 @login_required
-def answer(deck_id):
-    require_deck(deck_id)
-    pending = current_pending(deck_id)
+def answer(deck_name):
+    require_deck(deck_name)
+    pending = current_pending(deck_name)
     if "answer" in pending:
         abort(409, "This question has already been answered. Use the revealed verdict.")
     submitted = request.form.get("answer", "")
@@ -337,32 +432,28 @@ def answer(deck_id):
     # put in cookies, HTML, or hidden fields before reveal.
     if len(submitted) > 500:
         abort(400, "An answer must be at most 500 characters.")
-    data = models.question_data(pending["question_id"], deck_id)
-    if data is None:
-        abort(409, "This question no longer exists.")
+    data = data_for_pending(pending, deck_name)
     pending = dict(
         pending, answer=submitted,
         auto_verdict=reviews.verdict(submitted, data["expected"]),
     )
     session["study"] = pending
-    return redirect(url_for("web.study", deck_id=deck_id))
+    return redirect(url_for("web.study", deck_name=deck_name))
 
 
-@bp.post("/decks/<int:deck_id>/study/finish")
+@bp.post("/decks/<deck_name>/study/finish")
 @login_required
-def finish(deck_id):
-    require_deck(deck_id)
-    pending = current_pending(deck_id, require_answer=True)
+def finish(deck_name):
+    require_deck(deck_name)
+    pending = current_pending(deck_name, require_answer=True)
     scheduler = scheduler_for(pending["algorithm"])
-    data = models.question_data(pending["question_id"], deck_id)
-    if data is None:
-        abort(409, "This question no longer exists.")
+    data = data_for_pending(pending, deck_name)
     auto = reviews.verdict(pending["answer"], data["expected"])
     rating = request.form.get("rating", scheduler.default_rating(auto))
     control = request.form.get("control") or None
     try:
         reviews.finalize(
-            g.user["id"], deck_id, pending, rating, control,
+            g.user["id"], deck_name, pending, rating, control,
             current_app.config["SCHEDULERS"], int(time.time()),
         )
     except ValueError as exc:
@@ -372,26 +463,26 @@ def finish(deck_id):
         abort(409, str(exc))
     session.pop("study", None)
     session["queue"] = {
-        "deck_id": deck_id, "question_id": pending["question_id"],
+        "deck_name": deck_name, "question_id": pending["question_id"],
         "algorithm": pending["algorithm"],
     }
-    return redirect(url_for("web.study", deck_id=deck_id))
+    return redirect(url_for("web.study", deck_name=deck_name))
 
 
-@bp.post("/decks/<int:deck_id>/study/pause")
+@bp.post("/decks/<deck_name>/study/pause")
 @login_required
-def pause(deck_id):
-    require_deck(deck_id)
-    current_pending(deck_id)
+def pause(deck_name):
+    require_deck(deck_name)
+    current_pending(deck_name)
     session.pop("study", None)
     flash("Study paused. The unfinished question was not counted.")
-    return redirect(url_for("web.deck_detail", deck_id=deck_id))
+    return redirect(url_for("web.deck_detail", deck_name=deck_name))
 
 
-@bp.get("/decks/<int:deck_id>/history")
+@bp.get("/decks/<deck_name>/history")
 @login_required
-def history(deck_id):
-    deck = require_deck(deck_id)
+def history(deck_name):
+    deck = require_deck(deck_name)
     page = page_number()
     logs = get_db().execute(
         """SELECT l.*, q.kind, q.card_id,
@@ -400,9 +491,9 @@ def history(deck_id):
                    ORDER BY position LIMIT 1) AS front
            FROM review_log l JOIN questions q ON q.id = l.question_id
            JOIN cards c ON c.id = q.card_id
-           WHERE l.user_id = ? AND c.deck_id = ?
+           WHERE l.user_id = ? AND c.deck_name = ?
            ORDER BY l.id DESC LIMIT 31 OFFSET ?""",
-        (g.user["id"], deck_id, (page - 1) * 30),
+        (g.user["id"], deck_name, (page - 1) * 30),
     ).fetchall()
     return render_template(
         "history.html", deck=deck, logs=logs[:30], more=len(logs) > 30, page=page,

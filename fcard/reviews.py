@@ -15,13 +15,13 @@ def verdict(answer, expected):
     return "correct" if answer.casefold() == expected.casefold() else "incorrect"
 
 
-def candidates(deck_id, user_id, default_algorithm):
+def candidates(deck_name, user_id, default_algorithm):
     rows = get_db().execute(
         """SELECT q.id, p.algorithm, p.state_json, p.due_at, p.reviews
            FROM questions q JOIN cards c ON c.id = q.card_id
            LEFT JOIN progress p ON p.question_id = q.id AND p.user_id = ?
-           WHERE c.deck_id = ? ORDER BY q.id""",
-        (user_id, deck_id),
+           WHERE c.deck_name = ? ORDER BY q.id""",
+        (user_id, deck_name),
     ).fetchall()
     return [
         Candidate(
@@ -33,16 +33,16 @@ def candidates(deck_id, user_id, default_algorithm):
     ]
 
 
-def select_question(deck_id, user_id, default_algorithm, registry, now, queue):
-    pool = candidates(deck_id, user_id, default_algorithm)
+def select_question(deck_name, user_id, default_algorithm, registry, now, queue):
+    pool = candidates(deck_name, user_id, default_algorithm)
     if any(c.algorithm not in registry for c in pool):
         raise LookupError("A recorded scheduler is unavailable")
-    previous = queue.get("question_id") if queue.get("deck_id") == deck_id else None
-    last_algorithm = queue.get("algorithm") if queue.get("deck_id") == deck_id else None
+    previous = queue.get("question_id") if queue.get("deck_name") == deck_name else None
+    last_algorithm = queue.get("algorithm") if queue.get("deck_name") == deck_name else None
     return choose_question(pool, registry, now, previous, last_algorithm)
 
 
-def finalize(user_id, deck_id, pending, rating, control, registry, now):
+def finalize(user_id, deck_name, pending, rating, control, registry, now):
     """Apply exactly one final verdict, rejecting old tabs and replayed cookies."""
     algorithm = pending["algorithm"]
     scheduler = registry[algorithm]
@@ -52,9 +52,11 @@ def finalize(user_id, deck_id, pending, rating, control, registry, now):
     if control not in {None, *(c.value for c in scheduler.controls)}:
         raise ValueError("Unknown scheduler control")
     with transaction(get_db()) as db:
-        data = question_data(pending["question_id"], deck_id)
+        data = question_data(pending["question_id"], deck_name)
         if data is None:
             raise StaleReview("The question no longer exists")
+        if data["question"]["card_revision"] != pending["card_revision"]:
+            raise StaleReview("This card was edited. Start a fresh question before reviewing.")
         old = db.execute(
             "SELECT * FROM progress WHERE user_id = ? AND question_id = ?",
             (user_id, pending["question_id"]),

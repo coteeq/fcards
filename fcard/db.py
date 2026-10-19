@@ -6,7 +6,7 @@ import sqlite3
 
 from flask import current_app, g
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def get_db():

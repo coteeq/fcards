@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
+import re
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -45,12 +46,12 @@ class AppTest(unittest.TestCase):
             self.alice = get_db().execute(
                 "SELECT id FROM users WHERE username = 'Alice'"
             ).fetchone()[0]
-            self.deck_id = create_deck("German", "A shared deck", self.alice)
-            self.card_id = create_card(self.deck_id, {
+            self.deck_name = create_deck("German", "A shared deck", self.alice)
+            self.card_id = create_card(self.deck_name, {
                 "front": [("Brot", "nominative singular"), ("Brote", "plural")],
                 "back": [("bread", "noun")],
             }, "neuter")
-        self.study_url = f"/decks/{self.deck_id}/study"
+        self.study_url = f"/decks/{self.deck_name}/study"
 
     def tearDown(self):
         self.temp.cleanup()
@@ -117,44 +118,44 @@ class AppTest(unittest.TestCase):
     def test_deck_author_and_other_users_can_add(self):
         bob = self.app.test_client()
         self.login("Bob", bob)
-        response = self.post(f"/decks/{self.deck_id}/cards/new", {
+        response = self.post(f"/decks/{self.deck_name}/cards/new", {
             "front_text": ["Haus"], "front_description": [""],
             "back_text": ["house"], "back_description": [""],
         }, bob)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.rows("SELECT author_id FROM decks")[0]["author_id"], self.alice)
         self.assertEqual(len(self.rows("SELECT * FROM cards")), 2)
-        response = self.post("/decks/new", {"name": "French"}, bob)
+        response = self.post("/new-deck", {"name": "French"}, bob)
         self.assertEqual(response.status_code, 302)
         author = self.rows("SELECT u.username FROM decks d JOIN users u "
                            "ON u.id = d.author_id WHERE d.name = 'French'")
         self.assertEqual(author[0]["username"], "Bob")
-        self.assertEqual(self.post("/decks/new", {"name": "French"}, bob).status_code, 400)
-        self.assertEqual(self.post("/decks/new", {"name": "  "}, bob).status_code, 400)
+        self.assertEqual(self.post("/new-deck", {"name": "French"}, bob).status_code, 400)
+        self.assertEqual(self.post("/new-deck", {"name": "  "}, bob).status_code, 400)
 
     def test_ordered_forms_and_optional_metadata(self):
         with self.app.app_context():
             db = get_db()
             questions = db.execute("SELECT id, kind FROM questions ORDER BY id").fetchall()
-            front = question_data(questions[0]["id"], self.deck_id)
-            back = question_data(questions[1]["id"], self.deck_id)
-            meta = question_data(questions[2]["id"], self.deck_id)
+            front = question_data(questions[0]["id"], self.deck_name)
+            back = question_data(questions[1]["id"], self.deck_name)
+            meta = question_data(questions[2]["id"], self.deck_name)
             self.assertEqual((front["prompt"], front["expected"]), ("Brot", "bread"))
             self.assertEqual((back["prompt"], back["expected"]), ("bread", "Brot"))
             self.assertEqual((meta["prompt"], meta["expected"]), ("Brot", "neuter"))
-            card_id = create_card(self.deck_id, {
+            card_id = create_card(self.deck_name, {
                 "front": [("z", "first"), ("a", "second")],
                 "back": [("last", ""), ("first", "")],
             }, "   ")
             question_id = db.execute("SELECT id FROM questions WHERE card_id = ? "
                                      "AND kind = 'front_to_back'", (card_id,)).fetchone()[0]
-            data = question_data(question_id, self.deck_id)
+            data = question_data(question_id, self.deck_name)
             self.assertEqual((data["prompt"], data["expected"]), ("z", "last"))
             self.assertEqual(db.execute("SELECT COUNT(*) FROM questions WHERE card_id = ?",
                                         (card_id,)).fetchone()[0], 2)
 
     def test_html_add_rows_preserves_input_and_order(self):
-        path = f"/decks/{self.deck_id}/cards/new"
+        path = f"/decks/{self.deck_name}/cards/new"
         data = {
             "front_text": ["gehen"], "front_description": ["infinitive"],
             "back_text": ["go"], "back_description": ["verb"], "meta": "irregular",
@@ -174,7 +175,7 @@ class AppTest(unittest.TestCase):
                                 {"text": "ging", "position": 1}])
 
     def test_validation_is_atomic(self):
-        path = f"/decks/{self.deck_id}/cards/new"
+        path = f"/decks/{self.deck_name}/cards/new"
         valid = {"front_text": ["x"], "front_description": [""],
                  "back_text": ["y"], "back_description": [""]}
         for changes in ({"front_text": [""]}, {"back_text": ["x" * 501]},
@@ -185,7 +186,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.rows("SELECT * FROM questions")), 3)
         with self.app.app_context():
             with self.assertRaises(ValueError):
-                create_card(self.deck_id, {"front": [], "back": [("y", "")]}, "")
+                create_card(self.deck_name, {"front": [], "back": [("y", "")]}, "")
         self.assertEqual(len(self.rows("SELECT * FROM cards")), 1)
 
     def test_answer_no_leak_reveal_and_finalize(self):
@@ -207,8 +208,8 @@ class AppTest(unittest.TestCase):
         log = self.rows("SELECT * FROM review_log")[0]
         self.assertEqual((log["rating"], log["auto_verdict"]), ("correct", "correct"))
         self.assertEqual(log["before_state_json"], "null")
-        self.assertEqual(self.client.get(f"/decks/{self.deck_id}/history").status_code, 200)
-        self.assertEqual(self.client.get(f"/decks/{self.deck_id}").status_code, 200)
+        self.assertEqual(self.client.get(f"/decks/{self.deck_name}/history").status_code, 200)
+        self.assertEqual(self.client.get(f"/decks/{self.deck_name}").status_code, 200)
 
     def test_wrong_answer_can_be_corrected_and_extra_control_logged(self):
         self.start()
@@ -248,7 +249,7 @@ class AppTest(unittest.TestCase):
         self.assertTrue(all(p["reviews"] == 1 and p["lapses"] == 0 for p in progress))
         bob = self.app.test_client()
         self.login("Bob", bob)
-        response = bob.get(f"/decks/{self.deck_id}")
+        response = bob.get(f"/decks/{self.deck_name}")
         self.assertIn(b"0 seen", response.data)
         bob.get(self.study_url)
         self.assertEqual(self.session(bob)["study"]["revision"], 0)
@@ -295,23 +296,23 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.pending()["answer"], "bread")
         self.assertEqual(self.rows("SELECT * FROM progress"), [])
 
-    def test_csrf_theme_escaping_and_no_javascript(self):
+    def test_csrf_theme_escaping_and_script_policy(self):
         self.assertEqual(self.client.post("/logout").status_code, 400)
         self.assertEqual(self.client.post("/logout", data={"csrf": "☃"}).status_code, 400)
-        response = self.post("/theme", {"return_to": "https://evil.example"})
+        response = self.post("/theme", {"theme": "light", "return_to": "https://evil.example"})
         self.assertEqual(response.headers["Location"], "/")
         self.assertEqual(self.session()["theme"], "light")
-        self.post("/decks/new", {"name": '<script>alert("x")</script>'})
+        self.post("/new-deck", {"name": "Escaping", "description": '<script>alert("x")</script>'})
         response = self.client.get("/")
         self.assertNotIn(b"<script", response.data)
         self.assertIn(b"&lt;script&gt;", response.data)
-        self.assertIn("script-src 'none'", response.headers["Content-Security-Policy"])
+        self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     def test_missing_empty_pagination_and_limits(self):
         self.assertEqual(self.client.get("/decks/999").status_code, 404)
-        self.assertEqual(self.client.get(f"/decks/{self.deck_id}?page=no").status_code, 400)
-        self.assertEqual(self.client.get(f"/decks/{self.deck_id}?page=0").status_code, 400)
+        self.assertEqual(self.client.get(f"/decks/{self.deck_name}?page=no").status_code, 400)
+        self.assertEqual(self.client.get(f"/decks/{self.deck_name}?page=0").status_code, 400)
         with self.app.app_context():
             empty = create_deck("Empty", "", self.alice)
             for i in range(21):
@@ -355,7 +356,7 @@ class AppTest(unittest.TestCase):
         def finish_review(_):
             with self.app.app_context():
                 try:
-                    finalize(self.alice, self.deck_id, pending, "correct", None,
+                    finalize(self.alice, self.deck_name, pending, "correct", None,
                              self.app.config["SCHEDULERS"], 1000)
                     return "committed"
                 except StaleReview:
@@ -372,12 +373,212 @@ class AppTest(unittest.TestCase):
         self.answer("bread")
         self.finish()
         with self.app.app_context():
-            create_card(self.deck_id, {
+            create_card(self.deck_name, {
                 "front": [("Haus", "")], "back": [("house", "")],
             }, "")
-        response = self.client.get(f"/decks/{self.deck_id}")
+        response = self.client.get(f"/decks/{self.deck_name}")
         self.assertIn(b"1 seen", response.data)
         self.assertIn(b"4 new", response.data)
+
+    def edit_payload(self, **changes):
+        revision = self.rows("SELECT revision FROM cards WHERE id = ?", (self.card_id,))[0]["revision"]
+        return {
+            "revision": str(revision),
+            "front_text": ["Brot", "Brote"],
+            "front_description": ["nominative singular", "plural"],
+            "back_text": ["bread"], "back_description": ["noun"], "meta": "neuter",
+            **changes,
+        }
+
+    @property
+    def edit_url(self):
+        return f"/decks/{self.deck_name}/cards/{self.card_id}/edit"
+
+    def test_deck_names_are_primary_keys_and_c_identifiers(self):
+        self.assertEqual(self.deck_name, "German")
+        with self.app.app_context():
+            db = get_db()
+            columns = db.execute("PRAGMA table_info(decks)").fetchall()
+            self.assertNotIn("id", [column["name"] for column in columns])
+            self.assertEqual([c["name"] for c in columns if c["pk"]], ["name"])
+            self.assertEqual(db.execute("PRAGMA foreign_key_list(cards)").fetchone()["to"], "name")
+        self.assertEqual(self.client.get("/decks/German").status_code, 200)
+        self.assertEqual(self.client.get("/decks/1").status_code, 404)
+        for name in ("new", "_", "_German_2", "Deck9"):
+            response = self.post("/new-deck", {"name": name})
+            self.assertEqual(response.status_code, 302, name)
+            self.assertIn(f"/decks/{name}/", response.headers["Location"])
+            self.assertEqual(self.client.get(f"/decks/{name}").status_code, 200)
+        for name in ("", "1abc", "a-b", "a b", "déck", "foo/bar", " abc", "a" * 121):
+            self.assertEqual(self.post("/new-deck", {"name": name}).status_code, 400, name)
+            with self.app.app_context():
+                with self.assertRaises(ValueError):
+                    create_deck(name, "", self.alice)
+                with self.assertRaises(sqlite3.IntegrityError), transaction(get_db()) as db:
+                    db.execute("INSERT INTO decks (name, author_id, created_at) VALUES (?, ?, 0)",
+                               (name, self.alice))
+
+    def test_edit_form_preserves_question_progress(self):
+        self.start()
+        self.answer("bread")
+        self.finish()
+        questions = self.rows("SELECT * FROM questions")
+        progress = self.rows("SELECT * FROM progress")
+        response = self.client.get(self.edit_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'value="Brot"', response.data)
+        self.assertIn(b'value="Brote"', response.data)
+        response = self.post(self.edit_url, self.edit_payload(
+            front_text=["Laib", "Laibe"], back_text=["loaf"],
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows("SELECT * FROM questions"), questions)
+        self.assertEqual(self.rows("SELECT * FROM progress"), progress)
+        self.assertEqual(self.rows("SELECT revision FROM cards")[0]["revision"], 1)
+        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 1)
+        with self.app.app_context():
+            data = question_data(questions[0]["id"], self.deck_name)
+            self.assertEqual((data["prompt"], data["expected"]), ("Laib", "loaf"))
+
+    def test_remove_forms_is_local_until_save_and_promotes_first(self):
+        response = self.post(self.edit_url, self.edit_payload(action="remove_front_0"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.count(b'name="front_text"'), 1)
+        self.assertNotIn(b'value="Brot"', response.data)
+        self.assertIn(b'value="Brote"', response.data)
+        self.assertIn(b'value="bread"', response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM card_forms WHERE side='front'")), 2)
+        response = self.post(self.edit_url, self.edit_payload(
+            front_text=["Brote"], front_description=["plural"],
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows("SELECT text, position FROM card_forms WHERE side='front'"),
+                         [{"text": "Brote", "position": 0}])
+        response = self.post(self.edit_url, self.edit_payload(
+            front_text=["Brote"], front_description=["plural"], action="remove_front_0",
+        ))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(len(self.rows("SELECT * FROM card_forms WHERE side='front'")), 1)
+
+    def test_create_form_can_remove_rows_without_saving(self):
+        response = self.post(f"/decks/{self.deck_name}/cards/new", self.edit_payload(
+            action="remove_front_1",
+        ))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.count(b'name="front_text"'), 1)
+        self.assertIn(b'value="Brot"', response.data)
+        self.assertNotIn(b'value="Brote"', response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM cards")), 1)
+        self.assertEqual(self.post(self.edit_url, self.edit_payload(
+            action="remove_front_100",
+        )).status_code, 400)
+
+    def test_edit_metadata_removal_and_readdition(self):
+        for expected in ("bread", "Brot", "neuter"):
+            self.start()
+            self.answer(expected)
+            self.finish()
+        self.assertEqual(len(self.rows("SELECT * FROM progress")), 3)
+        response = self.post(self.edit_url, self.edit_payload(meta=""))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(self.rows("SELECT * FROM questions")), 2)
+        self.assertEqual(len(self.rows("SELECT * FROM progress")), 2)
+        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 2)
+        response = self.post(self.edit_url, self.edit_payload(meta="gender"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(self.rows("SELECT * FROM questions")), 3)
+        self.assertEqual(len(self.rows("SELECT * FROM progress")), 2)
+
+    def test_edit_stale_revision_and_validation_are_atomic(self):
+        payload = self.edit_payload(back_text=["loaf"])
+        self.assertEqual(self.post(self.edit_url, payload).status_code, 302)
+        self.assertEqual(self.post(self.edit_url, payload).status_code, 409)
+        saved = self.rows("SELECT * FROM card_forms")
+        self.assertEqual(self.post(self.edit_url, self.edit_payload(
+            front_text=[""], front_description=[""],
+        )).status_code, 400)
+        self.assertEqual(self.rows("SELECT * FROM card_forms"), saved)
+        self.assertEqual(self.rows("SELECT revision FROM cards")[0]["revision"], 1)
+
+    def test_edit_is_shared_but_card_is_scoped_to_its_deck(self):
+        bob = self.app.test_client()
+        self.login("Bob", bob)
+        response = self.post(self.edit_url, self.edit_payload(), bob)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows("SELECT author_id FROM decks")[0]["author_id"], self.alice)
+        self.post("/new-deck", {"name": "Other"})
+        path = f"/decks/Other/cards/{self.card_id}/edit"
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.post(path, self.edit_payload()).status_code, 404)
+
+    def test_card_edit_invalidates_unanswered_and_revealed_attempts(self):
+        self.start()
+        self.post(self.edit_url, self.edit_payload(back_text=["loaf"]))
+        self.assertEqual(self.answer("bread").status_code, 409)
+        self.start()
+        self.answer("loaf")
+        pending = self.pending()
+        self.post(self.edit_url, self.edit_payload(back_text=["bread"]))
+        with self.app.app_context(), self.assertRaises(StaleReview):
+            finalize(self.alice, self.deck_name, pending, "correct", None,
+                     self.app.config["SCHEDULERS"], 1000)
+        self.assertEqual(self.finish().status_code, 409)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+        self.start()
+        self.assertNotIn("answer", self.pending())
+
+    def test_quick_add_and_validation(self):
+        path = f"/decks/{self.deck_name}/cards/quick"
+        response = self.post(path, {"front": "Haus", "back": "house"}, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Edit card", response.data)
+        card = self.rows("SELECT * FROM cards WHERE id = 2")[0]
+        self.assertEqual((card["deck_name"], card["meta"]), ("German", ""))
+        self.assertEqual(len(self.rows("SELECT * FROM questions WHERE card_id=2")), 2)
+        forms = self.rows("SELECT side, text, description FROM card_forms WHERE card_id=2")
+        self.assertEqual({r["text"] for r in forms}, {"Haus", "house"})
+        self.assertTrue(all(r["description"] == "" for r in forms))
+        for changes in ({"front": ""}, {"front": " "}, {"back": "x" * 501}):
+            response = self.post(path, {"front": "Tree", "back": "Baum", **changes})
+            self.assertEqual(response.status_code, 400)
+            self.assertIn(b'data-quick-add', response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM cards")), 2)
+        self.assertEqual(self.client.post(path, data={"front": "x", "back": "y"}).status_code, 400)
+        self.assertEqual(self.client.get(path).status_code, 405)
+
+    def test_quick_add_keyboard_script_is_external_and_scoped(self):
+        response = self.client.get(f"/decks/{self.deck_name}")
+        self.assertIn(b'enterkeyhint="next"', response.data)
+        self.assertIn(b'enterkeyhint="done"', response.data)
+        self.assertIn(b'src="/static/quick-add.js" defer', response.data)
+        self.assertNotIn(b"quick-add.js", self.client.get("/").data)
+        with self.client.get("/static/quick-add.js") as response:
+            script = response.get_data(as_text=True)
+        self.assertIn("event.isComposing", script)
+        self.assertIn("back.focus()", script)
+        self.assertIn("quickAdd.requestSubmit()", script)
+
+    def test_header_is_fixed_and_username_menu_has_explicit_themes(self):
+        for path in ("/", f"/decks/{self.deck_name}", self.study_url, self.edit_url, "/new-deck"):
+            response = self.client.get(path)
+            html = response.get_data(as_text=True)
+            header = re.search(r"<header>(.*?)</header>", html, re.S).group(1)
+            nav = re.search(r"<nav.*?</nav>", header, re.S).group(0)
+            self.assertEqual(re.findall(r'href="([^"]+)"', nav), ["/"])
+            self.assertIn("<summary>Alice</summary>", header)
+            self.assertIn(">Logout</button>", header)
+            self.assertNotIn("Signed in as", html)
+            self.assertNotIn('class="brand"', html)
+            self.assertNotIn("<footer", html)
+            self.assertNotIn("All decks are shared. Progress is yours.", html)
+        for theme in ("dark", "system", "light"):
+            response = self.post("/theme", {"theme": theme, "return_to": f"/decks/{self.deck_name}"}, follow=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(f'data-theme="{theme}"'.encode(), response.data)
+        self.assertEqual(self.post("/theme", {"theme": "invalid"}).status_code, 400)
+        self.assertEqual(self.post("/logout").status_code, 302)
+        self.assertNotIn("user_id", self.session())
 
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})

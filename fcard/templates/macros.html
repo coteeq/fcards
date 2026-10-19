@@ -20,12 +20,12 @@
 </table>
 {% endmacro %}
 
-{% macro pagination(endpoint, deck_id, page, more) %}
+{% macro pagination(endpoint, deck_name, page, more) %}
 {% if page > 1 or more %}
 <nav class="tab-toolbar" aria-label="Pagination">
-  {% if page > 1 %}<a class="button" href="{{ url_for(endpoint, deck_id=deck_id, page=page-1) }}">← Previous</a>{% endif %}
+  {% if page > 1 %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page-1) }}">← Previous</a>{% endif %}
   <span class="muted">Page {{ page }}</span>
-  {% if more %}<a class="button" href="{{ url_for(endpoint, deck_id=deck_id, page=page+1) }}">Next →</a>{% endif %}
+  {% if more %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page+1) }}">Next →</a>{% endif %}
 </nav>
 {% endif %}
 {% endmacro %}

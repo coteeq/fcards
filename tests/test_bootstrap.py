@@ -30,7 +30,7 @@ class BootstrapTest(unittest.TestCase):
                     return get_db().execute("PRAGMA user_version").fetchone()[0]
 
             with ThreadPoolExecutor(max_workers=4) as pool:
-                self.assertEqual(list(pool.map(bootstrap, range(8))), [1] * 8)
+                self.assertEqual(list(pool.map(bootstrap, range(8))), [2] * 8)
 
     def test_nonempty_unversioned_database_is_not_adopted(self):
         with tempfile.TemporaryDirectory() as temp:

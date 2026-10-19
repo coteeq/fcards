@@ -5,8 +5,11 @@ CREATE TABLE users (
 );
 
 CREATE TABLE decks (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) BETWEEN 1 AND 120),
+    name TEXT PRIMARY KEY NOT NULL CHECK (
+        length(name) BETWEEN 1 AND 120
+        AND substr(name, 1, 1) GLOB '[A-Za-z_]'
+        AND name NOT GLOB '*[^A-Za-z0-9_]*'
+    ),
     description TEXT NOT NULL DEFAULT '',
     author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at INTEGER NOT NULL
@@ -14,11 +17,12 @@ CREATE TABLE decks (
 
 CREATE TABLE cards (
     id INTEGER PRIMARY KEY,
-    deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+    deck_name TEXT NOT NULL REFERENCES decks(name) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
     meta TEXT NOT NULL DEFAULT '' CHECK (length(meta) <= 500),
     created_at INTEGER NOT NULL
 );
-CREATE INDEX cards_deck ON cards(deck_id);
+CREATE INDEX cards_deck ON cards(deck_name);
 
 CREATE TABLE card_forms (
     id INTEGER PRIMARY KEY,
@@ -65,4 +69,4 @@ CREATE TABLE review_log (
 );
 CREATE INDEX review_log_user_time ON review_log(user_id, reviewed_at, id);
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;

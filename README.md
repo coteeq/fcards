@@ -1,8 +1,9 @@
 # fcard
 
-A server-rendered Flask + SQLite flashcard app. No client-side JavaScript and no
-passwords. The visual design and base stylesheet come from the sibling `cgi` app;
-its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
+A server-rendered Flask + SQLite flashcard app with username-only login. A small
+vanilla JavaScript handler makes Enter advance/submit the quick-add form; all other
+controls work without JavaScript. The visual design and base stylesheet come from the
+sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
 
 ## Run
 
@@ -26,6 +27,10 @@ The database and a persistent, private session-signing key are created automatic
 under `instance/`. Restarting does not erase data or invalidate sessions. Database
 initialization is transactional and safe for simultaneous worker startup. Unknown
 schema versions are rejected; there is no destructive reset command.
+
+The current schema is version 2 and requires a fresh database. No migration or URL
+compatibility layer for version 1 is included. If you have an earlier database, keep it
+as a backup and point `FCARD_DATABASE` to a new file rather than overwriting it.
 
 For another database path:
 
@@ -51,11 +56,16 @@ the database and its WAL files). Keep `instance/` out of publicly served directo
 1. Enter a username. An unseen name creates a user; a known name resumes its progress.
    Names are case-sensitive. Anyone can assume any username: this is intentionally
    not secure authentication. Do not use this app to store secrets.
-2. Create a shared deck. Its creator remains its attributed author, but any user can
-   browse it or add cards.
-3. Add a card with front and back text. Use “Add another … form” to append ordered
-   forms without JavaScript. The first form on each side is canonical; blank extra
-   rows are ignored. Each form can have a short description.
+2. Create a shared deck with a C-style name: `[A-Za-z_][A-Za-z0-9_]*`, at most 120
+   characters. Names are case-sensitive primary keys, used directly in URLs such as
+   `/decks/German_1`. Its creator remains its attributed author, but any user can browse
+   it or add/edit cards. The deck-creation page is `/new-deck`, so `new` is a valid name.
+3. Use the quick-add form on a deck page to enter just Front and Back. Enter moves from
+   Front to Back and submits from Back; mobile keyboards show Next/Done hints. Without
+   JavaScript, use Tab and the Add button. For more detail, choose Add card or Edit card.
+   Use “Add another … form” or “Remove this form” to change rows without JavaScript.
+   The first remaining form on each side is canonical; each side must keep one form.
+   Blank extra rows are ignored. Each form can have a short description.
 4. Optional metadata creates a third question. Every card always has front → back and
    back → front questions, each scheduled independently.
 5. Type an answer and check it. Unicode case folding is the only normalization:
@@ -68,11 +78,16 @@ the database and its WAL files). Keep `instance/` out of publicly served directo
    Raw answers are not stored in that history.
 
 Card/form text, metadata, and answers are limited to 500 characters; descriptions to
-160 characters; each side to 100 forms. Creation and browsing are supported, but
-editing and deletion are deliberately outside the MVP.
+160 characters; each side to 100 forms. Edits preserve question IDs and progress for
+all users. Removing metadata deletes only its question and that question's progress
+and review history. Other question progress is kept. Concurrent/stale edits and study
+submissions are rejected. Row additions/removals take effect only when saving the card.
+Whole-card and deck deletion are not exposed.
 
-The UI has system/light/dark themes, is responsive, and uses the same optional Google
-Font as `cgi`. If the font cannot be loaded, it falls back to monospace.
+The fixed header contains a Decks link and a username dropdown. Choose Light, Dark,
+System, or Logout there. The dropdown and theme selection work without JavaScript.
+The UI is responsive and uses the same optional Google Font as `cgi`; if the font
+cannot be loaded, it falls back to monospace.
 
 ## Scheduling
 
@@ -124,3 +139,8 @@ uv run --locked python -m unittest discover -s tests -v
 ```
 
 Tests use temporary databases and Flask's test client; no live server is needed.
+The optional keyboard-handler checks use Node's built-in assertions (no npm packages):
+
+```sh
+node tests/test_quick_add.cjs
+```

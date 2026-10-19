@@ -9,7 +9,7 @@
   <div class="card-body">
     <p class="prompt text">{{ data.prompt }}</p>
     {% if 'answer' not in pending %}
-    <form method="post" action="{{ url_for('web.answer', deck_id=deck.id) }}">
+    <form method="post" action="{{ url_for('web.answer', deck_name=deck.name) }}">
       {{ csrf() }}
       <input type="hidden" name="attempt" value="{{ pending.token }}">
       <label for="answer">Your {{ 'metadata' if data.question.kind == 'meta' else ('front' if data.question.kind == 'back_to_front' else 'back') }} answer</label>
@@ -31,7 +31,7 @@
 <section class="card">
   <h3 class="card-header">Finalize review</h3>
   <div class="card-body">
-    <form method="post" action="{{ url_for('web.finish', deck_id=deck.id) }}">
+    <form method="post" action="{{ url_for('web.finish', deck_name=deck.name) }}">
       {{ csrf() }}
       <input type="hidden" name="attempt" value="{{ pending.token }}">
       <fieldset>
@@ -56,7 +56,7 @@
   </div>
   {% endif %}
 </section>
-<form method="post" action="{{ url_for('web.pause', deck_id=deck.id) }}">
+<form method="post" action="{{ url_for('web.pause', deck_name=deck.name) }}">
   {{ csrf() }}
   <input type="hidden" name="attempt" value="{{ pending.token }}">
   <button>Pause without counting this question</button>
@@ -68,8 +68,8 @@
     <p>This deck is empty, or all questions are waiting for their next scheduled review.</p>
     <p class="muted">The bucket scheduler does not use dates: its questions stay available, with higher buckets appearing less often.</p>
     <div class="actions">
-      <a class="button" href="{{ url_for('web.new_card', deck_id=deck.id) }}">Add a card</a>
-      <a href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">Back to deck</a>
+      <a class="button" href="{{ url_for('web.new_card', deck_name=deck.name) }}">Add a card</a>
+      <a href="{{ url_for('web.deck_detail', deck_name=deck.name) }}">Back to deck</a>
     </div>
   </div>
 </section>

@@ -1,12 +1,13 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import csrf with context %}
-{% block title %}Add card · {{ deck.name }} · fcard{% endblock %}
+{% block title %}{{ 'Edit' if card else 'Add' }} card · {{ deck.name }} · fcard{% endblock %}
 {% block content %}
-<h2 class="page-title">Add a card to {{ deck.name }}</h2>
+<h2 class="page-title">{{ "Edit card #" ~ card.id if card else "Add a card" }} · {{ deck.name }}</h2>
 <p class="muted intro">Each side's first form is its prompt and expected answer. Forms stay in the order below. Extra forms and descriptions are revealed after answering.</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <form method="post">
   {{ csrf() }}
+  {% if card %}<input type="hidden" name="revision" value="{{ revision }}">{% endif %}
   {% for side in ('front', 'back') %}
   <section class="card">
     <h3 class="card-header">{{ side | title }}</h3>
@@ -18,6 +19,7 @@
         <input id="{{ side }}-text-{{ loop.index }}" name="{{ side }}_text" value="{{ text }}" maxlength="500" {% if loop.first %}required{% endif %}>
         <label for="{{ side }}-description-{{ loop.index }}">Short description <span class="muted">(optional)</span></label>
         <input id="{{ side }}-description-{{ loop.index }}" name="{{ side }}_description" value="{{ description }}" maxlength="160" placeholder="e.g. nominative singular, past tense">
+        <button name="action" value="remove_{{ side }}_{{ loop.index0 }}" formnovalidate {% if forms[side] | length == 1 %}disabled{% endif %}>Remove this form</button>
       </fieldset>
       {% endfor %}
       <button name="action" value="add_{{ side }}" formnovalidate>Add another {{ side }} form</button>
@@ -30,11 +32,12 @@
       <label for="meta">Free text <span class="muted">(optional)</span></label>
       <textarea id="meta" name="meta" rows="3" maxlength="500">{{ meta }}</textarea>
       <p class="muted">For example, “feminine” or “irregular”. Nonblank metadata creates an extra question, prompted by the front.</p>
+      {% if card %}<p class="muted">Removing metadata deletes its question and all users’ progress and history for that question. Other question progress is kept.</p>{% endif %}
     </div>
   </section>
   <div class="actions">
     <button class="primary" name="action" value="save">Save card</button>
-    <a href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">Cancel</a>
+    <a href="{{ url_for('web.deck_detail', deck_name=deck.name) }}">Cancel</a>
   </div>
 </form>
 {% endblock %}

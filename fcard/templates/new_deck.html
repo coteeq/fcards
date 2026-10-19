@@ -10,7 +10,8 @@
     <form method="post">
       {{ csrf() }}
       <label for="name">Name</label>
-      <input id="name" name="name" required maxlength="120" value="{{ request.form.get('name', '') }}" autofocus>
+      <input id="name" name="name" required maxlength="120" pattern="[A-Za-z_][A-Za-z0-9_]*" aria-describedby="name-help" value="{{ request.form.get('name', '') }}" autofocus>
+      <p class="muted" id="name-help">C-style identifier: start with an ASCII letter or underscore, followed by letters, digits, or underscores. This is also the deck’s URL.</p>
       <label for="description">Description <span class="muted">(optional)</span></label>
       <textarea id="description" name="description" rows="3" maxlength="2000">{{ request.form.get('description', '') }}</textarea>
       <div class="actions">
