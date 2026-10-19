@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import pagination with context %}
+{% block title %}History · {{ deck.name }} · fcard{% endblock %}
+{% block content %}
+<h2 class="page-title">Your reviews · {{ deck.name }}</h2>
+<p class="muted intro">Finalized reviews only. Corrections are recorded alongside the automatic verdict.</p>
+{% for log in logs %}
+<section class="card">
+  <h3 class="card-header">{{ question_labels[log.kind] }} · {{ log.reviewed_at | timestamp }}</h3>
+  <table class="fields">
+    <tr><th scope="row">Front</th><td class="text">{{ log.front }}</td></tr>
+    <tr><th scope="row">Automatic verdict</th><td>{{ log.auto_verdict }}</td></tr>
+    <tr><th scope="row">Final rating</th><td>{{ log.rating }}</td></tr>
+    <tr><th scope="row">Scheduler</th><td>{{ log.algorithm }}</td></tr>
+    {% if log.control %}<tr><th scope="row">Extra control</th><td>{{ log.control }}</td></tr>{% endif %}
+    <tr><th scope="row">State</th><td><code>{{ log.before_state_json }} → {{ log.after_state_json }}</code></td></tr>
+    <tr><th scope="row">Next due (UTC)</th><td>{{ (log.due_at | timestamp) if log.due_at is not none else 'No time gate' }}</td></tr>
+  </table>
+</section>
+{% else %}
+<p class="notice">No reviews on this page yet.</p>
+{% endfor %}
+{{ pagination('web.history', deck.id, page, more) }}
+{% endblock %}

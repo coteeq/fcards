@@ -1,0 +1,9 @@
+[project]
+name = "fcard"
+version = "0.1.0"
+description = "Server-rendered flashcards with shared decks and personal progress"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask>=3.1,<4",
+]

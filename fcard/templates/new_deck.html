@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import csrf with context %}
+{% block title %}New deck · fcard{% endblock %}
+{% block content %}
+<section class="card">
+  <h2 class="card-header">New global deck</h2>
+  <div class="card-body">
+    <p class="muted">Everyone can browse, study, and add cards. You will be recorded as the author.</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post">
+      {{ csrf() }}
+      <label for="name">Name</label>
+      <input id="name" name="name" required maxlength="120" value="{{ request.form.get('name', '') }}" autofocus>
+      <label for="description">Description <span class="muted">(optional)</span></label>
+      <textarea id="description" name="description" rows="3" maxlength="2000">{{ request.form.get('description', '') }}</textarea>
+      <div class="actions">
+        <button class="primary">Create deck</button>
+        <a href="{{ url_for('web.index') }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

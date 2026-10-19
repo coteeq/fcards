@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}fcard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='fcard.css') }}">
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1><a class="brand" href="{{ url_for('web.index') }}">fcard</a></h1>
+    {% if g.user %}
+    <nav class="tabs" aria-label="Main">
+      <a class="tab {{ 'active' if request.endpoint == 'web.index' }}" href="{{ url_for('web.index') }}">Decks</a>
+      {% if deck is defined %}
+      <a class="tab {{ 'active' if request.endpoint == 'web.deck_detail' }}" href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">Cards</a>
+      <a class="tab {{ 'active' if request.endpoint == 'web.study' }}" href="{{ url_for('web.study', deck_id=deck.id) }}">Study</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+    <form method="post" action="{{ url_for('web.theme') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="return_to" value="{{ request.full_path }}">
+      <button id="theme-toggle">Theme: {{ theme | title }}</button>
+    </form>
+  </header>
+  {% if g.user %}
+  <div class="account">
+    <span>Signed in as <strong>{{ g.user.username }}</strong></span>
+    <form method="post" action="{{ url_for('web.logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="btn-small">Switch user</button>
+    </form>
+  </div>
+  {% endif %}
+  <main id="main">
+    {% for message in get_flashed_messages() %}
+      <p class="notice" role="status">{{ message }}</p>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>fcard · Shared decks, personal progress · No JavaScript</footer>
+</div>
+</body>
+</html>

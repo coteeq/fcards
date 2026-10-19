@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import sides, pagination with context %}
+{% block title %}{{ deck.name }} · fcard{% endblock %}
+{% block content %}
+<section class="card">
+  <h2 class="card-header">{{ deck.name }}</h2>
+  <table class="fields">
+    <tr><th scope="row">Author</th><td>{{ deck.author }}</td></tr>
+    {% if deck.description %}<tr><th scope="row">About</th><td class="text">{{ deck.description }}</td></tr>{% endif %}
+    <tr><th scope="row">Your questions</th><td>{{ stats.seen }} seen · {{ stats.total - stats.seen }} new</td></tr>
+    <tr><th scope="row">Your reviews</th><td>{{ stats.reviews }} total · {{ stats.lapses }} incorrect</td></tr>
+  </table>
+</section>
+<div class="tab-toolbar">
+  <a class="button primary" href="{{ url_for('web.study', deck_id=deck.id) }}">Study</a>
+  <a class="button" href="{{ url_for('web.new_card', deck_id=deck.id) }}">Add card</a>
+  <a class="button" href="{{ url_for('web.history', deck_id=deck.id) }}">Your review history</a>
+</div>
+{% for card in cards %}
+<section class="card" id="card-{{ card.id }}">
+  <h3 class="card-header">Card #{{ card.id }} · {{ card.seen_count }}/{{ card.question_count }} questions seen</h3>
+  {{ sides(forms[card.id], card.meta) }}
+</section>
+{% else %}
+<p class="notice">{% if page == 1 %}No cards yet. Add the first card to this deck.{% else %}No cards on this page.{% endif %}</p>
+{% endfor %}
+{{ pagination('web.deck_detail', deck.id, page, more) }}
+{% endblock %}

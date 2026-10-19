@@ -1,0 +1,61 @@
+/* fcard additions to the sibling cgi application's MIT-licensed stylesheet. */
+a { color: var(--accent); text-underline-offset: 0.15em; }
+.brand { color: var(--text); text-decoration: none; }
+.tab, .button { text-decoration: none; display: inline-block; }
+button, .button, input, textarea, select {
+  font: inherit;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+button, .button { padding: 0.4rem 0.75rem; cursor: pointer; }
+button:hover, .button:hover { border-color: var(--accent); }
+button.primary, .button.primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input:not([type=radio]):not([type=hidden]), textarea, select {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  margin: 0.35rem 0 1rem;
+  min-width: 0;
+}
+textarea { resize: vertical; }
+label { display: block; }
+fieldset { border: 1px solid var(--border); padding: 0.8rem; margin: 0 0 1rem; min-width: 0; }
+legend { color: var(--text-muted); padding: 0 0.3rem; font-size: 0.85rem; }
+.radio-label { display: inline-flex; align-items: center; gap: 0.3rem; margin: 0.3rem 1rem 0.3rem 0; }
+input[type=radio] { accent-color: var(--accent); }
+.card-body { padding: 1rem; }
+.card-body p + p, .card-body p + form { margin-top: 0.8rem; }
+p { line-height: 1.45; overflow-wrap: anywhere; }
+.card-body > p { margin-bottom: 0.8rem; }
+.muted { color: var(--text-muted); font-size: 0.9rem; }
+.account, .actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.account { justify-content: space-between; margin-bottom: var(--gap); font-size: 0.85rem; }
+.page-title { font-size: 1.15rem; margin-bottom: 0.8rem; overflow-wrap: anywhere; }
+.intro { margin-bottom: var(--gap); }
+.notice { padding: 0.75rem 1rem; border: 1px solid var(--border); background: var(--label-bg); margin-bottom: var(--gap); }
+.error { margin-bottom: 1rem; }
+.card-header a { color: inherit; }
+.card-header { overflow-wrap: anywhere; }
+.fields td { word-break: normal; overflow-wrap: anywhere; }
+.fields th { white-space: normal; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.form-description { display: block; margin-top: 0.25rem; white-space: pre-wrap; }
+.prompt { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.25rem; }
+.answer-comparison dt { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.8rem; }
+.answer-comparison dd { margin-top: 0.25rem; }
+details { margin: 0.8rem 0; }
+details label { margin-top: 0.8rem; }
+summary { cursor: pointer; color: var(--text-muted); }
+.tab-toolbar { align-items: center; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme=system] .error { color: #ff8866; background: #2a1a14; border-color: #5a2a1a; }
+}
+@media (max-width: 480px) {
+  .tabs { flex-wrap: wrap; }
+  .prompt { font-size: 1.4rem; }
+  .fields th { width: 35%; }
+}

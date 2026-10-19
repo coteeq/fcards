@@ -1,0 +1,31 @@
+{% macro csrf() -%}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{%- endmacro %}
+
+{% macro sides(forms, meta) %}
+<table class="fields">
+  <tbody>
+    {% for side in ('front', 'back') %}
+      {% for form in forms[side] %}
+      <tr class="{{ 'highlight' if loop.first }}">
+        <th scope="row">{{ side | title }}{% if not loop.first %} {{ loop.index }}{% endif %}</th>
+        <td><span class="text">{{ form.text }}</span>{% if form.description %}<small class="muted form-description">{{ form.description }}</small>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    {% endfor %}
+    {% if meta %}
+    <tr><th scope="row">Metadata</th><td class="text">{{ meta }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro pagination(endpoint, deck_id, page, more) %}
+{% if page > 1 or more %}
+<nav class="tab-toolbar" aria-label="Pagination">
+  {% if page > 1 %}<a class="button" href="{{ url_for(endpoint, deck_id=deck_id, page=page-1) }}">← Previous</a>{% endif %}
+  <span class="muted">Page {{ page }}</span>
+  {% if more %}<a class="button" href="{{ url_for(endpoint, deck_id=deck_id, page=page+1) }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}

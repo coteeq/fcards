@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Decks · fcard{% endblock %}
+{% block content %}
+<div class="tab-toolbar">
+  <a class="button primary" href="{{ url_for('web.new_deck') }}">New deck</a>
+  <span class="muted">All decks are shared. Progress is yours.</span>
+</div>
+{% for deck in decks %}
+<section class="card">
+  <h2 class="card-header"><a href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">{{ deck.name }}</a></h2>
+  <table class="fields">
+    <tr><th scope="row">Author</th><td>{{ deck.author }}</td></tr>
+    {% if deck.description %}<tr><th scope="row">About</th><td class="text">{{ deck.description }}</td></tr>{% endif %}
+    <tr><th scope="row">Cards</th><td>{{ deck.card_count }}</td></tr>
+    <tr><th scope="row">Your questions</th><td><span class="badge">{{ deck.seen_count }} / {{ deck.question_count }} seen</span></td></tr>
+  </table>
+  <div class="card-body actions">
+    <a class="button" href="{{ url_for('web.study', deck_id=deck.id) }}">Study</a>
+    <a class="button" href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">Browse</a>
+    <a class="button" href="{{ url_for('web.new_card', deck_id=deck.id) }}">Add card</a>
+  </div>
+</section>
+{% else %}
+<section class="card"><div class="card-body"><p>No decks yet. Create the first one to start learning.</p></div></section>
+{% endfor %}
+{% endblock %}

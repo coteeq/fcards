@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}{{ error.code }} · fcard{% endblock %}
+{% block content %}
+<section class="card">
+  <h2 class="card-header">{{ error.code }} · {{ error.name }}</h2>
+  <div class="card-body">
+    <p class="error" role="alert">{{ error.description }}</p>
+    <a class="button" href="{{ url_for('web.index') }}">Back to decks</a>
+  </div>
+</section>
+{% endblock %}

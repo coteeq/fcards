@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import csrf with context %}
+{% block title %}Sign in · fcard{% endblock %}
+{% block content %}
+<section class="card">
+  <h2 class="card-header">Choose your username</h2>
+  <div class="card-body">
+    <p>Learn from any shared deck. Your question progress stays with your username.</p>
+    <p class="muted">No passwords: anyone can sign in as any username. Names are case-sensitive.</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post">
+      {{ csrf() }}
+      <label for="username">Username</label>
+      <input id="username" name="username" value="{{ request.form.get('username', '') }}" required maxlength="80" autocomplete="username" autofocus>
+      <button class="primary">Sign in / create user</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

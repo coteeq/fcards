@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import csrf, sides with context %}
+{% block title %}Study · {{ deck.name }} · fcard{% endblock %}
+{% block content %}
+<h2 class="page-title">{{ deck.name }}</h2>
+{% if pending %}
+<section class="card">
+  <h3 class="card-header">{{ data.label }} · {{ scheduler.label }} · Question #{{ pending.question_id }}</h3>
+  <div class="card-body">
+    <p class="prompt text">{{ data.prompt }}</p>
+    {% if 'answer' not in pending %}
+    <form method="post" action="{{ url_for('web.answer', deck_id=deck.id) }}">
+      {{ csrf() }}
+      <input type="hidden" name="attempt" value="{{ pending.token }}">
+      <label for="answer">Your {{ 'metadata' if data.question.kind == 'meta' else ('front' if data.question.kind == 'back_to_front' else 'back') }} answer</label>
+      <textarea id="answer" name="answer" rows="2" maxlength="500" autofocus autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <p class="muted">Exact match, ignoring case only. You can correct the verdict after reveal. An empty answer counts as incorrect.</p>
+      <button class="primary">Check answer</button>
+    </form>
+    {% else %}
+    <p><span class="url-status url-status--{{ 'ok' if auto_verdict == 'correct' else 'error' }}">{{ auto_verdict | title }}</span> <span class="muted">Automatic verdict</span></p>
+    <dl class="answer-comparison">
+      <dt>Your answer</dt><dd class="text">{{ pending.answer if pending.answer else '(empty)' }}</dd>
+      <dt>Expected answer</dt><dd class="text">{{ data.expected }}</dd>
+    </dl>
+    {% endif %}
+  </div>
+  {% if 'answer' in pending %}
+  {{ sides(data.forms, data.question.meta) }}
+</section>
+<section class="card">
+  <h3 class="card-header">Finalize review</h3>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('web.finish', deck_id=deck.id) }}">
+      {{ csrf() }}
+      <input type="hidden" name="attempt" value="{{ pending.token }}">
+      <fieldset>
+        <legend>Keep or correct the verdict</legend>
+        {% for rating in scheduler.ratings %}
+        <label class="radio-label"><input type="radio" name="rating" value="{{ rating.value }}" {{ 'checked' if rating.value == default_rating }}> {{ rating.label }}</label>
+        {% endfor %}
+      </fieldset>
+      {% if scheduler.controls %}
+      <details>
+        <summary>Scheduler controls (optional)</summary>
+        <label for="control">Extra adjustment after applying the verdict</label>
+        <select id="control" name="control">
+          <option value="">No extra adjustment</option>
+          {% for control in scheduler.controls %}<option value="{{ control.value }}">{{ control.label }}</option>{% endfor %}
+        </select>
+      </details>
+      {% endif %}
+      <p class="muted">“Next question” counts this review once. Pausing without advancing does not count it.</p>
+      <button class="primary">Next question →</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+<form method="post" action="{{ url_for('web.pause', deck_id=deck.id) }}">
+  {{ csrf() }}
+  <input type="hidden" name="attempt" value="{{ pending.token }}">
+  <button>Pause without counting this question</button>
+</form>
+{% else %}
+<section class="card">
+  <h3 class="card-header">No questions available</h3>
+  <div class="card-body">
+    <p>This deck is empty, or all questions are waiting for their next scheduled review.</p>
+    <p class="muted">The bucket scheduler does not use dates: its questions stay available, with higher buckets appearing less often.</p>
+    <div class="actions">
+      <a class="button" href="{{ url_for('web.new_card', deck_id=deck.id) }}">Add a card</a>
+      <a href="{{ url_for('web.deck_detail', deck_id=deck.id) }}">Back to deck</a>
+    </div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
