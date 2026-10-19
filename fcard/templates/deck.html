@@ -37,9 +37,15 @@
 </section>
 {% for card in cards %}
 <section class="card" id="card-{{ card.id }}">
-  <h3 class="card-header">Card #{{ card.id }} · {{ card.seen_count }}/{{ card.question_count }} questions seen</h3>
+  <h3 class="card-header card-header--editable">
+    Card #{{ card.id }} · {{ card.seen_count }}/{{ card.question_count }} questions seen
+    <a class="button card-edit" href="{{ url_for('web.edit_card', deck_name=deck.name, card_id=card.id) }}" aria-label="Edit card #{{ card.id }}" title="Edit card">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="m16 3 5 5M3 21l5-1L21 7a2.1 2.1 0 0 0-5-5L3 15z"/>
+      </svg>
+    </a>
+  </h3>
   {{ sides(forms[card.id], card.meta) }}
-  <div class="card-body actions"><a class="button" href="{{ url_for('web.edit_card', deck_name=deck.name, card_id=card.id) }}">Edit card</a></div>
 </section>
 {% else %}
 <p class="notice">{% if page == 1 %}No cards yet. Add the first card to this deck.{% else %}No cards on this page.{% endif %}</p>

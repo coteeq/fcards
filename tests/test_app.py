@@ -617,6 +617,77 @@ class AppTest(unittest.TestCase):
         self.assertNotIn("study", self.session())
         self.assertEqual(self.rows("SELECT * FROM progress"), [])
 
+    def test_sides_layout_is_shared_and_descriptions_stay_in_form_rows(self):
+        browse = self.client.get(f"/decks/{self.deck_name}").get_data(as_text=True)
+        self.start()
+        revealed = self.answer("bread").get_data(as_text=True)
+        for html in (browse, revealed):
+            sides = re.findall(
+                r'<section class="card-side card-side--(front|back)"[^>]*>(.*?)</section>',
+                html, re.S,
+            )
+            self.assertEqual([side for side, _ in sides], ["front", "back"])
+            for (side, content), expected in zip(sides, (
+                [("Brot", "nominative singular"), ("Brote", "plural")],
+                [("bread", "noun")],
+            )):
+                self.assertNotIn("side-heading", content)
+                self.assertNotIn(f">{side.title()}<", content)
+                self.assertIn(f'aria-label="{side.title()} forms"', content)
+                rows = re.findall(r'<li class="form-row[^"]*">(.*?)</li>', content, re.S)
+                self.assertEqual(len(rows), len(expected))
+                for row, (text, description) in zip(rows, expected):
+                    self.assertIn(f'<span class="form-text">{text}</span>', row)
+                    self.assertIn(f'class="muted form-description">{description}</small>', row)
+                self.assertEqual(content.count(" canonical"), 1)
+            self.assertIn('class="card-meta"', html)
+            self.assertIn("neuter", html)
+
+    def test_card_sides_support_unequal_forms_and_blank_descriptions(self):
+        response = self.post(self.edit_url, self.edit_payload(
+            front_text=["<front>"], front_description=[""],
+            back_text=["one", "two", "three"],
+            back_description=["first", "", "<third>"],
+        ), follow=True)
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        sides = dict(re.findall(
+            r'<section class="card-side card-side--(front|back)"[^>]*>(.*?)</section>',
+            html, re.S,
+        ))
+        self.assertEqual(sides["front"].count('<li class="form-row'), 1)
+        self.assertEqual(sides["back"].count('<li class="form-row'), 3)
+        self.assertIn("form-row--plain", sides["front"])
+        self.assertIn("&lt;front&gt;", sides["front"])
+        self.assertIn("&lt;third&gt;", sides["back"])
+        self.assertNotIn("<third>", sides["back"])
+        self.assertLess(sides["back"].index(">one<"), sides["back"].index(">two<"))
+        self.assertLess(sides["back"].index(">two<"), sides["back"].index(">three<"))
+
+    def test_card_layout_has_responsive_dividers_and_two_cell_form_rows(self):
+        with self.client.get("/static/fcard.css") as response:
+            css = response.get_data(as_text=True)
+        self.assertIn(".card-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }", css)
+        self.assertIn(".card-side--back { border-left: 2px solid var(--accent); }", css)
+        self.assertIn("@media (max-width: 600px)", css)
+        self.assertIn(".card-sides { grid-template-columns: minmax(0, 1fr); }", css)
+        self.assertIn("border-top: 3px solid var(--accent)", css)
+        self.assertRegex(css, r"(?s)\.form-row \{.*?grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);.*?align-items: start;")
+        self.assertNotIn(".form-description { display: block;", css)
+
+    def test_edit_link_is_a_compact_icon_in_card_heading(self):
+        html = self.client.get(f"/decks/{self.deck_name}").get_data(as_text=True)
+        heading = re.search(
+            r'<h3 class="card-header card-header--editable">(.*?)</h3>', html, re.S,
+        ).group(1)
+        self.assertIn(f'href="{self.edit_url}"', heading)
+        self.assertIn(f'aria-label="Edit card #{self.card_id}"', heading)
+        self.assertIn('title="Edit card"', heading)
+        self.assertIn('<svg width="14" height="14"', heading)
+        self.assertIn('aria-hidden="true"', heading)
+        self.assertEqual(html.count(f'href="{self.edit_url}"'), 1)
+        self.assertNotIn(">Edit card</a>", html)
+
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})
         with new_app.app_context():

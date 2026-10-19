@@ -66,10 +66,53 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .error { margin-bottom: 1rem; }
 .card-header a { color: inherit; }
 .card-header { overflow-wrap: anywhere; }
+.card-header--editable { position: relative; padding-right: 3rem; }
+.card-edit {
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  padding: 0.1rem;
+  line-height: 1;
+}
 .fields td { word-break: normal; overflow-wrap: anywhere; }
 .fields th { white-space: normal; }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.form-description { display: block; margin-top: 0.25rem; white-space: pre-wrap; }
+.card-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card-side { min-width: 0; }
+.card-side--back { border-left: 2px solid var(--accent); }
+.form-list { list-style: none; padding: 0; margin: 0; }
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+}
+.form-row + .form-row { border-top: 1px solid var(--border); }
+.form-text, .form-description { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.form-row--plain .form-text { grid-column: 1 / -1; }
+.canonical .form-text { font-weight: 700; }
+.form-description { margin: 0; line-height: inherit; }
+.card-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.card-meta > strong { color: var(--text-muted); }
+@media (max-width: 600px) {
+  .card-sides { grid-template-columns: minmax(0, 1fr); }
+  .card-side--back { border-left: 0; border-top: 3px solid var(--accent); }
+}
 .prompt { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.25rem; }
 .answer-comparison dt { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.8rem; }
 .answer-comparison dd { margin-top: 0.25rem; }

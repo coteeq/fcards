@@ -3,21 +3,26 @@
 {%- endmacro %}
 
 {% macro sides(forms, meta) %}
-<table class="fields">
-  <tbody>
-    {% for side in ('front', 'back') %}
+<div class="card-sides">
+  {% for side in ('front', 'back') %}
+  <section class="card-side card-side--{{ side }}" aria-label="{{ side | title }}">
+    <ol class="form-list" aria-label="{{ side | title }} forms">
       {% for form in forms[side] %}
-      <tr class="{{ 'highlight' if loop.first }}">
-        <th scope="row">{{ side | title }}{% if not loop.first %} {{ loop.index }}{% endif %}</th>
-        <td><span class="text">{{ form.text }}</span>{% if form.description %}<small class="muted form-description">{{ form.description }}</small>{% endif %}</td>
-      </tr>
+      <li class="form-row{{ ' canonical' if loop.first }}{{ ' form-row--plain' if not form.description }}">
+        <span class="form-text">{{ form.text }}</span>
+        {% if form.description %}<small class="muted form-description">{{ form.description }}</small>{% endif %}
+      </li>
       {% endfor %}
-    {% endfor %}
-    {% if meta %}
-    <tr><th scope="row">Metadata</th><td class="text">{{ meta }}</td></tr>
-    {% endif %}
-  </tbody>
-</table>
+    </ol>
+  </section>
+  {% endfor %}
+</div>
+{% if meta %}
+<div class="card-meta">
+  <strong>Metadata</strong>
+  <span class="text">{{ meta }}</span>
+</div>
+{% endif %}
 {% endmacro %}
 
 {% macro pagination(endpoint, deck_name, page, more) %}

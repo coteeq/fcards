@@ -91,8 +91,12 @@ Whole-card and deck deletion are not exposed.
 
 The fixed header contains a Decks link and a username dropdown. Choose Light, Dark,
 System, or Logout there. The dropdown and theme selection work without JavaScript.
-The UI is responsive and uses the same optional Google Font as `cgi`; if the font
-cannot be loaded, it falls back to monospace.
+Deck cards and revealed answers show Front on the left and Back on the right, each
+with its own top-aligned list of forms. At widths of 600px or less, the sides stack
+vertically with a prominent divider. Each form's description occupies the adjacent
+cell of the same row, including on mobile; long text wraps within its own cell.
+The UI uses the same optional Google Font as `cgi`; if the font cannot be loaded, it
+falls back to monospace.
 
 ## Scheduling
 
