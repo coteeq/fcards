@@ -23,10 +23,12 @@ so the explicit `uv sync` step is optional.
 Use `uv add <package>` to add dependencies and `uv lock --upgrade` to update the
 lockfile. Keep `pyproject.toml` and `uv.lock` together when sharing the app.
 
-The database and a persistent, private session-signing key are created automatically
-under `instance/`. Restarting does not erase data or invalidate sessions. Database
-initialization is transactional and safe for simultaneous worker startup. Unknown
-schema versions are rejected; there is no destructive reset command.
+The database is created automatically under `instance/`. The session-signing key is
+random and ephemeral by default: restarting the server logs everyone out and discards
+unfinished questions, but does not erase users, cards, or finalized progress. No key
+file is written. Database initialization is transactional and safe for simultaneous
+worker startup. Unknown schema versions are rejected; there is no destructive reset
+command.
 
 The current schema is version 2 and requires a fresh database. No migration or URL
 compatibility layer for version 1 is included. If you have an earlier database, keep it
@@ -40,16 +42,43 @@ FCARD_DATABASE=/absolute/path/to/fcard.sqlite3 uv run --locked flask --app fcard
 
 Optional settings:
 
-- `FCARD_SECRET_KEY`: use an explicit, long random secret instead of the local key.
+- `FCARD_SECRET_KEY`: optionally use an explicit, long random secret to preserve
+  sessions across restarts or share sessions between independent server instances.
 - `FCARD_SESSION_COOKIE_SECURE=true`: require HTTPS for the session cookie when
   deployed behind TLS.
 - `FCARD_DEFAULT_ALGORITHM=buckets-v1`: default scheduler for previously unseen
   questions. Existing progress retains its recorded algorithm.
 
 Flask's built-in server is for development. For deployment, use a WSGI server with
-`fcard:create_app()`, a writable local database directory, and a stable secret.
+`fcard:create_app()` and a writable local database directory. With multiple workers,
+create the application before forking so workers share its ephemeral key (Gunicorn
+`--preload`, already configured in Docker), or set one shared `FCARD_SECRET_KEY`.
 Back up the SQLite database using SQLite's backup API (or stop the app before copying
 the database and its WAL files). Keep `instance/` out of publicly served directories.
+
+## Docker
+
+From `fcards/`:
+
+```sh
+docker build -t fcard .
+docker run --rm --name fcard -p 5000:5000 -v fcard-data:/app/instance fcard
+```
+
+Open <http://127.0.0.1:5000>. The image runs Gunicorn with two workers as a non-root
+user, exposes port 5000, and includes an HTTP health check. Dependencies are installed
+with uv from `uv.lock`; the final image does not include uv or build tooling.
+
+The named volume keeps the SQLite database across container replacements. Sessions
+are intentionally invalidated on restart unless you set a stable `FCARD_SECRET_KEY`.
+Do not remove the volume unless you intend to erase the database.
+For a bind mount instead, ensure its directory is writable by UID/GID **10001**.
+
+Pass configuration with `docker run -e`, for example
+`-e FCARD_SESSION_COOKIE_SECURE=true` when serving behind HTTPS. An explicit
+`FCARD_SECRET_KEY` is optional; keeping it stable preserves sessions across restarts.
+The default database path is
+`/app/instance/fcard.sqlite3`; keep any custom database path on a persistent volume.
 
 ## Use
 

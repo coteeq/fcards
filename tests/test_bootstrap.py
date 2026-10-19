@@ -4,19 +4,51 @@ import sqlite3
 import tempfile
 import unittest
 
-from fcard import create_app, persistent_secret
+from fcard import create_app
 from fcard.db import get_db
 
 
 class BootstrapTest(unittest.TestCase):
-    def test_key_is_persistent_and_concurrent_safe(self):
+    def login_cookie(self, app):
+        client = app.test_client()
+        client.get("/login")
+        with client.session_transaction() as session:
+            csrf = session["csrf"]
+        response = client.post("/login", data={"csrf": csrf, "username": "Alice"})
+        self.assertEqual(response.status_code, 302)
+        return client.get_cookie("session").value
+
+    def test_ephemeral_key_changes_and_logs_out_without_erasing_users(self):
         with tempfile.TemporaryDirectory() as temp:
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                keys = list(pool.map(lambda _: persistent_secret(temp), range(8)))
-            self.assertTrue(all(key == keys[0] for key in keys))
-            self.assertEqual(len(keys[0]), 32)
-            self.assertEqual(Path(temp, "secret.key").stat().st_mode & 0o777, 0o600)
-            self.assertEqual(list(Path(temp).iterdir()), [Path(temp, "secret.key")])
+            config = {
+                "TESTING": True, "DATABASE": str(Path(temp) / "db.sqlite3"),
+                "SECRET_KEY": None,
+            }
+            first = create_app(config)
+            cookie = self.login_cookie(first)
+            second = create_app(config)
+            self.assertEqual(len(first.config["SECRET_KEY"]), 32)
+            self.assertNotEqual(first.config["SECRET_KEY"], second.config["SECRET_KEY"])
+            client = second.test_client()
+            client.set_cookie("session", cookie)
+            response = client.get("/")
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.headers["Location"], "/login")
+            with second.app_context():
+                self.assertEqual(get_db().execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+
+    def test_explicit_key_can_preserve_sessions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = {
+                "TESTING": True, "DATABASE": str(Path(temp) / "db.sqlite3"),
+                "SECRET_KEY": "explicit-shared-secret",
+            }
+            first = create_app(config)
+            cookie = self.login_cookie(first)
+            second = create_app(config)
+            client = second.test_client()
+            client.set_cookie("session", cookie)
+            self.assertEqual(client.get("/").status_code, 200)
 
     def test_schema_startup_is_concurrent_safe(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -4,29 +4,11 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import secrets
-import tempfile
 
 from flask import Flask
 
 from . import db
 from .schedulers import Buckets
-
-
-def persistent_secret(instance):
-    """Publish a complete key atomically, safe for simultaneous worker startup."""
-    key_path = Path(instance) / "secret.key"
-    if not key_path.exists():
-        with tempfile.NamedTemporaryFile(dir=instance) as temp:
-            temp.write(secrets.token_bytes(32))
-            temp.flush()
-            try:
-                os.link(temp.name, key_path)
-            except FileExistsError:
-                pass
-    key = key_path.read_bytes()
-    if len(key) < 32:
-        raise RuntimeError("instance/secret.key must contain at least 32 bytes")
-    return key
 
 
 def create_app(test_config=None):
@@ -45,7 +27,9 @@ def create_app(test_config=None):
         app.config.update(test_config)
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     if not app.config["SECRET_KEY"]:
-        app.config["SECRET_KEY"] = persistent_secret(app.instance_path)
+        # Multi-worker servers must create the app before forking (e.g. Gunicorn
+        # --preload), or supply one shared FCARD_SECRET_KEY explicitly.
+        app.config["SECRET_KEY"] = secrets.token_bytes(32)
     if app.config["SCHEDULERS"] is None:
         app.config["SCHEDULERS"] = {"buckets-v1": Buckets()}
     if app.config["DEFAULT_ALGORITHM"] not in app.config["SCHEDULERS"]:

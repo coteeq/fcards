@@ -1,0 +1,9 @@
+.git/
+.venv/
+instance/
+**/__pycache__/
+**/*.py[cod]
+.coverage
+.env
+.env.*
+tests/
