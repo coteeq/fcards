@@ -101,6 +101,14 @@ header .tab, .user-menu > summary {
 .duplicate-hint ul { padding-left: 1.2rem; margin-top: 0.4rem; }
 .duplicate-hint li + li { margin-top: 0.35rem; }
 .duplicate-hint a { overflow-wrap: anywhere; }
+.choice-group { --choice-fg: #2878c7; }
+.choice-group[data-selection-mode=manual] { --choice-fg: #d97919; }
+.choice-group input[type=radio] { accent-color: var(--choice-fg); }
+.choice-status { display: inline-block; color: var(--text-muted); }
+.choice-group[hidden] { display: none; }
+.classification-help { margin-bottom: 0.5rem; }
+.quick-add > .word-classification { flex: 1 0 100%; order: 2; }
+.quick-add .choice-group { margin-bottom: 0.5rem; }
 .quick-add { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
 .quick-add > div { flex: 1 1 10rem; min-width: 0; }
 .quick-add input:not([type=hidden]) { margin-bottom: 0; }

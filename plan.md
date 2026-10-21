@@ -12,11 +12,11 @@
   opening a deck is sufficient. Author attribution is required and does not change
   when another user adds cards.
 - **cards**: `id`, `deck_name` (FK to decks.name), `revision` (nonnegative integer),
-  `meta` (optional free text), `created_at`. Revision starts at 0 and increments on
-  every edit, independently of per-user progress revisions.
-  A card belongs to one deck in this MVP; duplicate content is allowed. Its sides are
-  opaque **front** and **back**, with no source/target language semantics. Side text
-  lives in ordered forms, not duplicated columns on the card.
+  `meta` (optional free text), nullable `word_type` and `gender`, `created_at`.
+  Revision starts at 0 and increments on every edit, independently of per-user progress
+  revisions. A card belongs to one deck; duplicate content is allowed. Side text lives
+  in ordered **front** and **back** forms, not duplicated card columns. German is on
+  Back; German-specific classification and gender questions use its first form.
 - **card_forms**: `id`, `card_id` (FK), `side` (`front` or `back`), `position`
   (zero-based within the side), `text`, `description`. Unique
   `(card_id, side, position)`. Each side must have at least one form, enforced by the
@@ -30,26 +30,40 @@
   Other forms and their descriptions are shown after answering. Descriptions are short
   free text, not a fixed grammar enum. Alternate forms are not automatically accepted
   as canonical answers; the user can correct the verdict when appropriate.
-- Metadata is one arbitrary text value (e.g. `feminine; irregular plural`). It is not a
-  language-specific schema. Recovering it asks for the entire value, prompted by the
-  front. Separate attributes/questions could be introduced later without changing forms.
+- Metadata remains arbitrary free text (e.g. `irregular plural`), separate from word
+  type and gender. Recovering it asks for the entire value, prompted by the front.
+- `word_type` is NULL (unknown) or `adjective`, `verb`, `noun`, `phrase`.
+  `gender` is NULL (unknown) or `masculine`, `feminine`, `neuter`; a non-NULL gender
+  requires type `noun`. These are card-wide attributes, not per-form descriptions.
+- Missing new-card classifications use the canonical Back text: remove a leading
+  case-insensitive `der/die/das` for counting; multiple remaining words mean phrase,
+  otherwise an article means noun, otherwise an `-en` ending means verb. Other words
+  stay unclassified. Nouns infer masculine/feminine/neuter from `der/die/das` unless an
+  explicit gender (including unknown) was supplied. These are hints, not full parsing;
+  plural and grammatical case can make articles ambiguous. Original form text is kept.
+- Inferred and manual choices persist identically. No provenance flag is stored. Saved
+  values, including unknowns, are not automatically reinterpreted on subsequent edits.
 
 ## Questions are not cards
 
 - **questions**: `id`, `card_id` (FK), `kind` constrained to `front_to_back`,
-  `back_to_front`, or `meta`; unique `(card_id, kind)`.
+  `back_to_front`, `meta`, or `gender`; unique `(card_id, kind)`.
 - `front_to_back`: first front form → first back form.
 - `back_to_front`: first back form → first front form.
 - `meta`: first front form → metadata. Only created for nonblank metadata.
-- Two mandatory questions plus one optional question are created atomically with the
-  card and its forms. Forms are not separate questions in this MVP.
+- `gender`: first Back form with its leading `der/die/das` removed → the article for
+  the stored gender. Only exists for nouns with known gender. No other forms or article
+  are revealed in the prompt. Explicit stored gender takes precedence over source text.
+- Two mandatory questions and up to two optional questions are created atomically with
+  the card and its forms. Forms are not separate questions.
 
 ## Answers and verdicts
 
-- Each question accepts a typed answer. The server compares it to the canonical
-  expected answer using Unicode `casefold()` on both strings. No whitespace trimming,
-  accent removal, punctuation normalization, or fuzzy matching: apart from case,
-  matching is exact. The same rule applies to metadata questions.
+- Translation/metadata questions accept typed answers. Gender answers select one of
+  `der`, `die`, `das`, with none selected initially. The server compares the submitted
+  answer to the canonical expected answer using Unicode `casefold()` on both strings.
+  No whitespace trimming, accent removal, punctuation normalization, or fuzzy matching:
+  apart from case, matching is exact. An empty answer is incorrect for every kind.
 - A match automatically produces `correct`; a mismatch produces `incorrect`. In both
   cases the expected answer, both sides, forms, and metadata are revealed. The user
   may change either verdict before moving to the next question.
@@ -72,7 +86,7 @@
 - No progress row means *new*, not missing/broken. This avoids eagerly generating the
   user × question Cartesian product. Questions added after a user starts a deck are
   immediately available.
-- A user's three question kinds have independent schedules. There is no global
+- A user's question kinds have independent schedules. There is no global
   card-level scheduling state and no user-specific copy of shared vocabulary.
 - `algorithm` is a versioned scheduler identifier; `state_json` is algorithm-owned,
   versioned state. Existing questions use their recorded algorithm; the configured
@@ -114,7 +128,7 @@
   nullable `due_at`. `control` records an optional algorithm-specific adjustment.
   Written in the same transaction as progress and immutable through the application.
   Absence of prior state is JSON `null`; the initial bucket is still interpreted as 0.
-- `auto_verdict` stores `correct` or `incorrect` from the typed-answer comparison.
+- `auto_verdict` stores `correct` or `incorrect` from the submitted-answer comparison.
   `rating` stores the final scheduler input after any user correction. For
   `buckets-v1`, it is exactly `correct` or `incorrect`, not a bucket number or delta.
   Comparing these fields identifies corrected verdicts. Ratings are interpreted with
@@ -137,23 +151,26 @@ deletion, as do user → progress/log. Deck author deletion is restricted so att
 cannot disappear; user/deck/whole-card deletion is not exposed. Unique/check constraints
 cover identities, sides, form order, question kinds, nonblank required text,
 and nonnegative counters. Indexes cover deck cards, question lookup, user due queues,
-and review history. At-least-one-form-per-side and optional-meta-question rules span
-tables and are enforced at the application write boundary.
+and review history. At-least-one-form-per-side and optional meta/gender question rules
+span tables and are enforced at the application write boundary.
 
 Card editing preserves the card ID and all remaining question IDs/progress. Forms are
 replaced atomically in their submitted order; removing the first promotes the next.
 At least one form on each side remains mandatory. Blank metadata deletes its question
 and cascades to that question's progress/history for every user. Adding metadata creates
 its question if absent; changing nonblank metadata preserves that question's progress.
+Similarly, clearing gender or changing away from noun deletes only the gender question
+and its progress/history; assigning a known noun gender creates it if absent. Changing
+one known gender to another preserves the gender question ID, progress, and history.
 Edits compare the submitted card revision before incrementing it, rejecting stale saves.
 Form IDs are not progression identities and can change on save. Existing review logs
 retain scheduling state, not historical side text; history displays current card text.
 
 Quick creation uses the same card-creation transaction with one form per side, empty
-form descriptions, and no metadata, yielding exactly two questions. It needs no separate
-table or data model. Reusing a card in several decks would require a deck-card join
-table and an explicit decision whether progress is shared across decks; currently each
-deck's card is independent.
+form descriptions, and no metadata. It yields two translation questions, plus a gender
+question for a known-gender noun. It needs no separate table or data model. Reusing a
+card in several decks would require a deck-card join table and an explicit decision
+whether progress is shared across decks; currently each deck's card is independent.
 
 Search reads existing form text on either side across all decks. English/German ASCII
 normalization is computed at query time by a SQLite connection-local function: it needs
@@ -162,8 +179,14 @@ answer comparison rules remain unchanged. Advisory duplicate checks compare whol
 normalized keys across either side of every deck and exclude the card being edited.
 They do not impose uniqueness, alter progress, or add tables/indexes.
 
-Schema evolution uses SQLite `user_version` (current version 2). Populated databases
-must be preserved. Every future schema change must include an explicit transactional
-migration that preserves vocabulary, users, personal progress, and review history.
-Upgrades must never reset or replace the database. Versions without a supported
-migration are rejected rather than silently mutated or erased.
+Schema evolution uses SQLite `user_version` (current version 3). The v2 → v3 migration
+adds nullable classification columns, rebuilds the question-kind constraint preserving
+all question IDs, classifies canonical Back forms, and adds unseen gender questions for
+known-gender nouns. Existing forms, metadata, revisions, users, progress, and logs stay
+unchanged. Foreign-key enforcement is temporarily disabled only on the migration
+connection outside its transaction to avoid cascades during the rebuild. The upgrade
+holds an immediate writer lock, checks all foreign keys before committing, and restores
+FK enforcement even on failure. DDL, backfill, and version changes roll back together.
+Already-upgraded databases are not reclassified. Every future schema change must ship
+an explicit transactional migration preserving populated data. Upgrades must never
+reset or replace the database; unsupported versions are rejected rather than erased.

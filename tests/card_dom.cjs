@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId = '' } = {}) {
+function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId = '', classification = null } = {}) {
   let focused;
   class Element {
     constructor(tag, attrs = {}) {
@@ -115,6 +115,38 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
   }
   const meta = new Element('textarea', { name: 'meta' });
   form.append(meta, new Element('button', { name: 'action', value: 'save' }));
+  let choices;
+  if (classification) {
+    const root = new Element('div', { 'data-word-classification': '' });
+    function group(name, values, selected, mode) {
+      const node = new Element('fieldset', { 'data-choice': name, 'data-selection-mode': mode });
+      node.append(new Element('input', { type: 'hidden', name: name + '_mode', value: mode }));
+      for (const value of values) {
+        const label = new Element('label');
+        const input = new Element('input', { type: 'radio', name, value });
+        input.checked = value === selected;
+        label.append(input, new Element('span'));
+        node.append(label);
+      }
+      node.append(new Element('small', { 'data-choice-status': '' }));
+      root.append(node);
+      return node;
+    }
+    const initialMode = classification.committed ? 'manual' : 'auto';
+    const type = group('word_type', ['adjective', 'verb', 'noun', 'phrase'],
+      classification.type, classification.typeMode || initialMode);
+    const gender = quick ? null : group('gender', ['masculine', 'feminine', 'neuter', ''],
+      classification.gender ?? (classification.committed ? '' : null),
+      classification.genderMode || initialMode);
+    form.append(root);
+    choices = { root, type, gender,
+      choose(name, value, event = 'click') {
+        const radios = (name === 'word_type' ? type : gender).querySelectorAll('input[type="radio"]');
+        radios.forEach((input) => { input.checked = input.value === value; });
+        radios.find((input) => input.checked).emit(event);
+      },
+    };
+  }
   form.elements = new Proxy({}, { get: (_, name) => form.querySelector(`[name="${String(name)}"]`) });
   form.reportValidity = () => !form.querySelectorAll('input').some((input) => input.required && !input.value);
   const panel = new Element('aside', { id: 'duplicates' });
@@ -132,7 +164,7 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
     fetch(url, options) { return new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })); },
   });
   return {
-    doc, form, panel, status, list, meta, timers, requests,
+    doc, form, panel, status, list, meta, timers, requests, choices,
     get focused() { return focused; },
     rows: (side) => [...form.querySelector(`[data-form-rows="${side}"]`).children],
     load(script) { vm.runInContext(fs.readFileSync(path.join(__dirname, '../fcard/static', script), 'utf8'), context); },

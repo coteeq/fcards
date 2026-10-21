@@ -39,6 +39,31 @@
 </section>
 {% endmacro %}
 
+{% macro word_classification(word_type=none, gender=none, full=false, committed=false) %}
+<div class="word-classification" data-word-classification>
+  <fieldset class="choice-group" data-choice="word_type" data-selection-mode="{{ 'manual' if committed else request.form.get('word_type_mode', 'auto') }}">
+    <legend>German word type (Back)</legend>
+    <input type="hidden" name="word_type_mode" value="{{ 'manual' if committed else request.form.get('word_type_mode', 'auto') }}">
+    {% for value in word_types %}
+    <label class="radio-label"><input type="radio" name="word_type" value="{{ value }}" {{ 'checked' if word_type == value }}> <span>{{ value | title }}</span></label>
+    {% endfor %}
+    <small class="choice-status" data-choice-status>{{ 'Manual · locked' if committed or request.form.get('word_type_mode') == 'manual' else 'Automatic' }}</small>
+  </fieldset>
+  {% if full %}
+  <fieldset class="choice-group" data-choice="gender" data-selection-mode="{{ 'manual' if committed else request.form.get('gender_mode', 'auto') }}">
+    <legend>Gender (nouns only)</legend>
+    <input type="hidden" name="gender_mode" value="{{ 'manual' if committed else request.form.get('gender_mode', 'auto') }}">
+    {% for value, label in gender_labels.items() %}
+    <label class="radio-label"><input type="radio" name="gender" value="{{ value }}" {{ 'checked' if gender == value }}> <span>{{ label }}</span></label>
+    {% endfor %}
+    <label class="radio-label"><input type="radio" name="gender" value="" {{ 'checked' if gender == '' or (committed and not gender) }}> <span>Unknown / no gender question</span></label>
+    <small class="choice-status" data-choice-status>{{ 'Manual · locked' if committed or request.form.get('gender_mode') == 'manual' else 'Automatic' }}</small>
+  </fieldset>
+  {% endif %}
+  <p class="muted classification-help">Blue: automatic hint from the first Back form. Orange: manually selected and locked. Tap even a selected option to lock it.{% if not full %} Gender is inferred silently from der/die/das; use the full editor to override it.{% endif %}</p>
+</div>
+{% endmacro %}
+
 {% macro word_search(query='', autofocus=false) %}
 <form class="word-search" method="get" action="{{ url_for('web.search') }}" role="search" data-live-search data-live-url="{{ url_for('web.live_search') }}">
   <label class="sr-only" for="word-search">Search words in all decks</label>

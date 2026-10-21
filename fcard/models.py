@@ -5,12 +5,14 @@ import time
 
 from .db import get_db, transaction
 from .search import search_keys
+from .german import INFER, GENDERS, classification, split_article
 
 DECK_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,119}")
 QUESTION_LABELS = {
     "front_to_back": "Front → Back",
     "back_to_front": "Back → Front",
     "meta": "Front → Metadata",
+    "gender": "Back → Gender",
 }
 
 
@@ -92,15 +94,18 @@ def insert_forms(db, card_id, forms):
         )
 
 
-def create_card(deck_name, forms, meta):
+def create_card(deck_name, forms, meta, word_type=INFER, gender=INFER):
     forms, meta = validate_card(forms, meta)
+    word_type, gender = classification(forms["back"][0][0], word_type, gender)
     with transaction(get_db()) as db:
         card_id = db.execute(
-            "INSERT INTO cards (deck_name, meta, created_at) VALUES (?, ?, ?)",
-            (deck_name, meta, int(time.time())),
+            "INSERT INTO cards (deck_name, meta, word_type, gender, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (deck_name, meta, word_type, gender, int(time.time())),
         ).lastrowid
         insert_forms(db, card_id, forms)
-        kinds = ["front_to_back", "back_to_front"] + (["meta"] if meta else [])
+        kinds = (["front_to_back", "back_to_front"] + (["meta"] if meta else [])
+                 + (["gender"] if word_type == "noun" and gender else []))
         db.executemany(
             "INSERT INTO questions (card_id, kind) VALUES (?, ?)",
             [(card_id, kind) for kind in kinds],
@@ -108,14 +113,22 @@ def create_card(deck_name, forms, meta):
     return card_id
 
 
-def update_card(deck_name, card_id, forms, meta, revision):
-    """Preserve question IDs and schedules; only a removed meta question is deleted."""
+def update_card(deck_name, card_id, forms, meta, revision, word_type=INFER, gender=INFER):
+    """Committed classification stays manual; preserve all remaining question schedules."""
     forms, meta = validate_card(forms, meta)
     with transaction(get_db()) as db:
+        saved = card_or_none(deck_name, card_id)
+        if saved is None:
+            raise CardConflict("This card no longer exists.")
+        word_type, gender = classification(
+            forms["back"][0][0],
+            saved["word_type"] if word_type is INFER else word_type,
+            saved["gender"] if gender is INFER else gender,
+        )
         updated = db.execute(
-            """UPDATE cards SET meta = ?, revision = revision + 1
+            """UPDATE cards SET meta = ?, word_type = ?, gender = ?, revision = revision + 1
                WHERE id = ? AND deck_name = ? AND revision = ?""",
-            (meta, card_id, deck_name, revision),
+            (meta, word_type, gender, card_id, deck_name, revision),
         )
         if updated.rowcount != 1:
             raise CardConflict("This card changed in another tab. Reload before editing.")
@@ -129,6 +142,14 @@ def update_card(deck_name, card_id, forms, meta, revision):
         else:
             # Explicitly removing metadata also removes that question's progress/log.
             db.execute("DELETE FROM questions WHERE card_id = ? AND kind = 'meta'", (card_id,))
+        if word_type == "noun" and gender:
+            db.execute(
+                "INSERT INTO questions (card_id, kind) VALUES (?, 'gender') "
+                "ON CONFLICT (card_id, kind) DO NOTHING", (card_id,),
+            )
+        else:
+            # As with metadata, explicitly removing the question cascades only its history.
+            db.execute("DELETE FROM questions WHERE card_id = ? AND kind = 'gender'", (card_id,))
 
 
 def search_cards(query, user_id, page, limit=20):
@@ -200,7 +221,7 @@ def forms_for_cards(card_ids):
 
 def question_data(question_id, deck_name):
     question = get_db().execute(
-        """SELECT q.*, c.meta, c.revision AS card_revision FROM questions q
+        """SELECT q.*, c.meta, c.gender, c.revision AS card_revision FROM questions q
            JOIN cards c ON c.id = q.card_id WHERE q.id = ? AND c.deck_name = ?""",
         (question_id, deck_name),
     ).fetchone()
@@ -209,7 +230,10 @@ def question_data(question_id, deck_name):
     forms = forms_for_cards([question["card_id"]])[question["card_id"]]
     kind = question["kind"]
     prompt = forms["back" if kind == "back_to_front" else "front"][0]["text"]
-    if kind == "meta":
+    if kind == "gender":
+        _, prompt = split_article(forms["back"][0]["text"])
+        expected = GENDERS[question["gender"]]
+    elif kind == "meta":
         expected = question["meta"]
     else:
         expected = forms["front" if kind == "back_to_front" else "back"][0]["text"]

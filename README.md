@@ -2,7 +2,7 @@
 
 A server-rendered Flask + SQLite flashcard app with username-only login, primarily for
 English ↔ German vocabulary. Small vanilla JavaScript handlers provide live search
-and Enter shortcuts for quick-add and study answers. All controls also work without
+and Enter shortcuts, client-side row editing, and German classification hints. All controls also work without
 JavaScript using their buttons. The visual design and base stylesheet come from the
 sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
 
@@ -31,11 +31,17 @@ file is written. Database initialization is transactional and safe for simultane
 worker startup. Unknown schema versions are rejected; there is no destructive reset
 command.
 
-The current schema is version 2. Existing version-2 databases are reused in place;
-search adds no schema changes. Future schema changes must ship explicit, transactional
-migrations that preserve existing vocabulary, users, progress, and review history.
-Never reset or replace a populated database as part of an upgrade. Back up the database
-before migrations; versions without an implemented migration are rejected, not erased.
+The current schema is version 3. **Stop the old server and back up the database before
+upgrading.** On startup, version-2 databases are migrated transactionally in place:
+classification fields are added, existing canonical Back forms are classified with the
+rules below, and known nouns receive a new gender question. Stored form text, metadata,
+all existing question IDs, users, progress, and review history are preserved. New gender
+questions start unseen for every user. The migration checks foreign keys before commit;
+a failure rolls back the entire upgrade, including DDL and the schema version.
+Simultaneous startup is serialized, and reopening v3 does not reclassify saved values.
+
+Never reset or replace a populated database as part of an upgrade. Future changes must
+ship explicit, transactional migrations. Unsupported versions are rejected, not erased.
 
 For another database path:
 
@@ -107,12 +113,15 @@ The default database path is
    rows before saving. Saving trims leading/trailing whitespace from form text,
    descriptions, and metadata; interior spaces, punctuation, and spelling are kept.
    Trimming also runs server-side, including for quick-add and edits without JavaScript.
-4. Optional metadata creates a third question. Every card always has front → back and
-   back → front questions, each scheduled independently.
+4. Every card has front → back and back → front questions, each scheduled independently.
+   Nonblank metadata adds a question; a noun with a known gender adds a separate gender
+   question. German belongs on **Back**; classification uses only its first form.
 5. Type an answer and check it. Unicode case folding is the only normalization:
    spaces, accents, and punctuation still matter. Only the canonical first form is
    automatically accepted. Enter checks the answer; Shift+Enter inserts a newline.
-   All forms and both sides are then revealed.
+   Gender questions instead offer radio choices, with no choice selected initially.
+   They show the German Back word without its leading article, so the prompt does not
+   give away the answer. All forms and both sides are revealed after checking.
 6. The Finalize review card is collapsed by default. Open it to correct the verdict
    or adjust the scheduler; Next question stays outside and is focused after reveal,
    so Enter advances. Advancing finalizes exactly one review. Empty answers are
@@ -126,7 +135,9 @@ The default database path is
 Card/form text, metadata, and answers are limited to 500 characters; descriptions to
 160 characters; each side to 100 forms. Edits preserve question IDs and progress for
 all users. Removing metadata deletes only its question and that question's progress
-and review history. Other question progress is kept. Concurrent/stale edits and study
+and review history. Likewise, clearing a noun's gender or changing to a non-noun removes
+only its gender question and that question's progress/history. Changing a known gender
+preserves its question ID and schedule. Concurrent/stale edits and study
 submissions are rejected. Row additions/removals take effect only when saving the card.
 Whole-card and deck deletion are not exposed.
 
@@ -138,6 +149,41 @@ vertically with a prominent divider. Each form's description occupies the adjace
 cell of the same row, including on mobile; long text wraps within its own cell.
 The UI uses the same optional Google Font as `cgi`; if the font cannot be loaded, it
 falls back to monospace.
+
+## German word type and gender
+
+Both add forms offer **Adjective / Verb / Noun / Phrase** radios. Only the canonical
+first Back form drives the local JavaScript hints, in this order:
+
+1. Remove a leading `der`, `die`, or `das` for counting purposes. If more than one word
+   remains, choose Phrase (e.g. `spazieren gehen` or `der gute Morgen`).
+2. Otherwise, a leading article means Noun (`der Morgen`, despite its `-en` ending).
+3. Otherwise, a word ending in `-en` means Verb.
+4. Otherwise, leave the type unselected; adjectives can be selected manually.
+
+Article matching is case-insensitive and accepts whitespace such as tabs/nonbreaking
+spaces. The original article and spelling stay stored in Back. For nouns, `der`
+infers masculine, `die` feminine, and `das` neuter. These are simple dictionary-entry
+hints, not grammatical parsing: plural/case forms can be ambiguous. Override them when
+needed; indefinite articles are not inferred.
+
+Quick-add infers gender silently on the server. In the full add/edit form, choosing
+Noun shows separate gender radios with the same article hint, plus **Unknown / no
+gender question**. A manually selected gender can differ from the written article.
+Without JavaScript, the full form leaves gender choices visible and the server infers
+omitted new-card values; explicitly selected choices still win.
+
+**Blue means automatic; orange means manual/locked.** Tapping an option—even one
+already selected automatically—or changing it by keyboard locks that group. Type and
+gender lock independently, so manually selecting Noun still lets gender follow the
+article until gender is selected manually. Hidden gender choices are retained in the
+draft if you switch away from Noun and back, but non-nouns persist with no gender.
+
+Automatic/manual provenance is never stored in the database. When editing a saved card,
+both values are manual/locked, including unknown values; changing Back does not silently
+reclassify it. On creation, the server supplies missing hints even without JavaScript.
+Only known-gender nouns get a gender question, independently scheduled and finalized
+through the same reveal/correction flow as other questions.
 
 ## Existing-word hints while adding
 
@@ -152,7 +198,7 @@ lost. Matches, lookup failures, and outstanding requests never require confirmat
 disable Save: duplicate cards remain allowed. Adding/removing form rows refreshes the
 hints; stale responses are ignored. The lookup uses a CSRF-protected read-only request
 and does not create cards or change progress. Like search, this currently scans forms;
-there is no schema change, migration, or rewrite of existing data.
+duplicate hints themselves need no stored index, migration, or data rewrite.
 
 ## Word search
 
@@ -247,4 +293,5 @@ node tests/test_study_keyboard.cjs
 node tests/test_live_search.cjs
 node tests/test_card_editor.cjs
 node tests/test_card_entry.cjs
+node tests/test_word_classification.cjs
 ```

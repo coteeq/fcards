@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import csrf, card_view, word_search, pagination, duplicate_hint with context %}
+{% from 'macros.html' import csrf, card_view, word_search, pagination, duplicate_hint, word_classification with context %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='quick-add.js') }}" defer></script>
 <script src="{{ url_for('static', filename='search.js') }}" defer></script>
 <script src="{{ url_for('static', filename='card-entry.js') }}" defer></script>
+<script src="{{ url_for('static', filename='word-classification.js') }}" defer></script>
 {% endblock %}
 {% block title %}{{ deck.name }} · fcard{% endblock %}
 {% block content %}
@@ -36,6 +37,7 @@
         <label for="quick-back">Back</label>
         <input id="quick-back" name="back" required maxlength="500" enterkeyhint="done" value="{{ request.form.get('back', '') }}">
       </div>
+      {{ word_classification(request.form.get("word_type")) }}
       <button class="primary">Add</button>
     </form>
     {{ duplicate_hint("quick-duplicates") }}

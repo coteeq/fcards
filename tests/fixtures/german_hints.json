@@ -1,0 +1,16 @@
+[
+  {"text": "der Morgen", "type": "noun", "gender": "masculine", "word": "Morgen"},
+  {"text": "die Katze", "type": "noun", "gender": "feminine", "word": "Katze"},
+  {"text": "das Haus", "type": "noun", "gender": "neuter", "word": "Haus"},
+  {"text": " \tDER\tMorgen  ", "type": "noun", "gender": "masculine", "word": "Morgen"},
+  {"text": "DAS Haus", "type": "noun", "gender": "neuter", "word": "Haus"},
+  {"text": "gehen", "type": "verb", "gender": null, "word": "gehen"},
+  {"text": "GEHEN", "type": "verb", "gender": null, "word": "GEHEN"},
+  {"text": "spazieren gehen", "type": "phrase", "gender": null, "word": "spazieren gehen"},
+  {"text": "der gute Morgen", "type": "phrase", "gender": null, "word": "gute Morgen"},
+  {"text": "guten Morgen", "type": "phrase", "gender": null, "word": "guten Morgen"},
+  {"text": "groß", "type": null, "gender": null, "word": "groß"},
+  {"text": "gehen!", "type": null, "gender": null, "word": "gehen!"},
+  {"text": "der", "type": null, "gender": null, "word": "der"},
+  {"text": "", "type": null, "gender": null, "word": ""}
+]

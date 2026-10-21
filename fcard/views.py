@@ -14,6 +14,7 @@ from werkzeug.exceptions import HTTPException
 from .db import get_db, transaction
 from . import models, reviews
 from .search import matches_search, search_keys
+from .german import INFER, WORD_TYPES, GENDERS, GENDER_LABELS
 
 bp = Blueprint("web", __name__)
 
@@ -55,6 +56,9 @@ def template_context():
         "csrf_token": csrf_token,
         "theme": session.get("theme", "system"),
         "question_labels": models.QUESTION_LABELS,
+        "word_types": WORD_TYPES,
+        "gender_labels": GENDER_LABELS,
+        "gender_articles": GENDERS,
     }
 
 
@@ -297,7 +301,7 @@ def quick_card(deck_name):
         "back": [(request.form.get("back", ""), "")],
     }
     try:
-        models.create_card(deck_name, forms, "")
+        models.create_card(deck_name, forms, "", request.form.get("word_type", INFER))
     except ValueError as exc:
         return render_deck(deck, quick_error=str(exc))
     flash("Card added.")
@@ -335,6 +339,7 @@ def card_editor(deck, card=None):
     editing = card is not None
     forms = {"front": [("", "")], "back": [("", "")]}
     meta = ""
+    word_type = gender = None
     revision = None
     if editing:
         saved = models.forms_for_cards([card["id"]])[card["id"]]
@@ -343,11 +348,14 @@ def card_editor(deck, card=None):
             for side, rows in saved.items()
         }
         meta = card["meta"]
+        word_type, gender = card["word_type"], card["gender"]
         revision = card["revision"]
     error = None
     if request.method == "POST":
         forms = read_forms()
         meta = request.form.get("meta", "")
+        word_type = request.form.get("word_type", word_type)
+        gender = request.form.get("gender", gender)
         if editing:
             try:
                 revision = int(request.form["revision"])
@@ -399,10 +407,15 @@ def card_editor(deck, card=None):
                     if editing:
                         models.update_card(
                             deck["name"], card["id"], cleaned, meta, revision,
+                            word_type=word_type, gender=gender,
                         )
                         card_id = card["id"]
                     else:
-                        card_id = models.create_card(deck["name"], cleaned, meta)
+                        card_id = models.create_card(
+                            deck["name"], cleaned, meta,
+                            word_type=request.form.get("word_type", INFER),
+                            gender=request.form.get("gender", INFER),
+                        )
                 except ValueError as exc:
                     error = str(exc)
                 except models.CardConflict as exc:
@@ -421,7 +434,7 @@ def card_editor(deck, card=None):
             abort(400, "Unknown form action.")
     return render_template(
         "new_card.html", deck=deck, card=card, forms=forms, meta=meta,
-        revision=revision, error=error,
+        revision=revision, error=error, word_type=word_type, gender=gender,
     ), (400 if error else 200)
 
 
@@ -519,6 +532,8 @@ def answer(deck_name):
     if len(submitted) > 500:
         abort(400, "An answer must be at most 500 characters.")
     data = data_for_pending(pending, deck_name)
+    if data["question"]["kind"] == "gender" and submitted not in ("", *GENDERS.values()):
+        abort(400, "Choose a gender from the offered answers.")
     pending = dict(
         pending, answer=submitted,
         auto_verdict=reviews.verdict(submitted, data["expected"]),

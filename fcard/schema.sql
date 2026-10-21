@@ -20,6 +20,9 @@ CREATE TABLE cards (
     deck_name TEXT NOT NULL REFERENCES decks(name) ON DELETE CASCADE,
     revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
     meta TEXT NOT NULL DEFAULT '' CHECK (length(meta) <= 500),
+    word_type TEXT CHECK (word_type IN ('adjective', 'verb', 'noun', 'phrase')),
+    gender TEXT CHECK (gender IN ('masculine', 'feminine', 'neuter'))
+        CHECK (gender IS NULL OR (word_type IS NOT NULL AND word_type = 'noun')),
     created_at INTEGER NOT NULL
 );
 CREATE INDEX cards_deck ON cards(deck_name);
@@ -37,7 +40,7 @@ CREATE TABLE card_forms (
 CREATE TABLE questions (
     id INTEGER PRIMARY KEY,
     card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('front_to_back', 'back_to_front', 'meta')),
+    kind TEXT NOT NULL CHECK (kind IN ('front_to_back', 'back_to_front', 'meta', 'gender')),
     UNIQUE (card_id, kind)
 );
 
@@ -69,4 +72,4 @@ CREATE TABLE review_log (
 );
 CREATE INDEX review_log_user_time ON review_log(user_id, reviewed_at, id);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

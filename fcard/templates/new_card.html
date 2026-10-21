@@ -1,8 +1,9 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import csrf, duplicate_hint with context %}
+{% from 'macros.html' import csrf, duplicate_hint, word_classification with context %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='card-entry.js') }}" defer></script>
 <script src="{{ url_for('static', filename='card-editor.js') }}" defer></script>
+<script src="{{ url_for('static', filename='word-classification.js') }}" defer></script>
 {% endblock %}
 {% block title %}{{ 'Edit' if card else 'Add' }} card · {{ deck.name }} · fcard{% endblock %}
 {% block content %}
@@ -39,11 +40,18 @@
   </section>
   {% endfor %}
   <section class="card">
+    <h3 class="card-header">German classification</h3>
+    <div class="card-body">
+      {{ word_classification(word_type, gender, full=true, committed=card is not none) }}
+      {% if card %}<p class="muted">Removing a known noun gender or changing away from noun deletes its gender question and that question’s progress/history. Remaining question schedules are kept.</p>{% endif %}
+    </div>
+  </section>
+  <section class="card">
     <h3 class="card-header">Metadata</h3>
     <div class="card-body">
       <label for="meta">Free text <span class="muted">(optional)</span></label>
       <textarea id="meta" name="meta" rows="3" maxlength="500">{{ meta }}</textarea>
-      <p class="muted">For example, “feminine” or “irregular”. Nonblank metadata creates an extra question, prompted by the front.</p>
+      <p class="muted">For example, “irregular plural”. Gender has its own field above. Nonblank metadata creates an extra question, prompted by the front.</p>
       {% if card %}<p class="muted">Removing metadata deletes its question and all users’ progress and history for that question. Other question progress is kept.</p>{% endif %}
     </div>
   </section>

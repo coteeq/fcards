@@ -262,7 +262,7 @@ class AppTest(unittest.TestCase):
                 self.assertIn('<svg width="14" height="14"', row)
                 self.assertIn('aria-hidden="true"', row)
                 self.assertNotIn(">Remove this form</button>", row)
-            self.assertNotIn("<fieldset", html)
+                self.assertNotIn("<fieldset", row)
 
     def test_trash_button_is_disabled_only_for_single_form_side(self):
         html = self.client.get(self.edit_url).get_data(as_text=True)
@@ -1116,6 +1116,185 @@ class AppTest(unittest.TestCase):
         self.assertIn('data-form-rows="front"', html)
         self.assertIn(f'data-card-id="{self.card_id}"', html)
         self.assertIn('value="add_front" formnovalidate', html)
+
+    def german_card(self, back="der Morgen", **choices):
+        with self.app.app_context():
+            return create_card(self.deck_name, {
+                "front": [("morning", "")], "back": [(back, "")],
+            }, "", **choices)
+
+    def gender_attempt(self, card_id):
+        self.start()
+        question_id = self.rows("SELECT id FROM questions WHERE card_id=? AND kind='gender'",
+                                (card_id,))[0]["id"]
+        revision = self.rows("SELECT revision FROM cards WHERE id=?", (card_id,))[0]["revision"]
+        progress = self.rows("SELECT reviews FROM progress WHERE user_id=? AND question_id=?",
+                             (self.alice, question_id))
+        with self.client.session_transaction() as session:
+            session["study"] = dict(session["study"], question_id=question_id,
+                                    card_revision=revision,
+                                    revision=progress[0]["reviews"] if progress else 0)
+        return self.start()
+
+    def test_quick_add_infers_gender_from_back_not_front(self):
+        for back, gender in ((" der Morgen ", "masculine"), ("die Katze", "feminine"),
+                             ("das Haus", "neuter")):
+            response = self.post(f"/decks/{self.deck_name}/cards/quick",
+                                 {"front": "English", "back": back})
+            self.assertEqual(response.status_code, 302)
+            card = self.rows("SELECT * FROM cards ORDER BY id DESC LIMIT 1")[0]
+            self.assertEqual((card["word_type"], card["gender"]), ("noun", gender))
+            self.assertEqual(len(self.rows("SELECT * FROM questions WHERE card_id=?",
+                                          (card["id"],))), 3)
+        self.post(f"/decks/{self.deck_name}/cards/quick",
+                  {"front": "der Morgen", "back": "morning"})
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards ORDER BY id DESC LIMIT 1"),
+                         [{"word_type": None, "gender": None}])
+
+    def test_quick_type_override_is_authoritative_and_gender_stays_silent(self):
+        self.post(f"/decks/{self.deck_name}/cards/quick",
+                  {"front": "morning", "back": "der Morgen", "word_type": "phrase",
+                   "word_type_mode": "auto"})
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=2"),
+                         [{"word_type": "phrase", "gender": None}])
+        html = self.client.get(f"/decks/{self.deck_name}").get_data(as_text=True)
+        quick = re.search(r'<form class="quick-add".*?</form>', html, re.DOTALL)[0]
+        self.assertEqual(quick.count('type="radio" name="word_type"'), 4)
+        self.assertNotIn('name="gender"', quick)
+        self.assertIn('static/word-classification.js', html)
+
+    def test_full_add_infers_without_js_and_allows_explicit_gender_or_unknown(self):
+        path = f"/decks/{self.deck_name}/cards/new"
+        fields = self.edit_payload(front_text=["morning"], front_description=[""],
+                                   back_text=["der Morgen"], back_description=[""], meta="")
+        self.assertEqual(self.post(path, fields).status_code, 302)
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=2"),
+                         [{"word_type": "noun", "gender": "masculine"}])
+        self.assertEqual(self.post(path, dict(fields, word_type="noun", gender="feminine",
+                                             word_type_mode="auto", gender_mode="auto")).status_code, 302)
+        self.assertEqual(self.rows("SELECT gender FROM cards WHERE id=3"), [{"gender": "feminine"}])
+        self.assertEqual(self.post(path, dict(fields, word_type="noun", gender="")).status_code, 302)
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=4"),
+                         [{"word_type": "noun", "gender": None}])
+        self.assertEqual(len(self.rows("SELECT * FROM questions WHERE card_id=4")), 2)
+        for choices in ({"word_type": "adverb"}, {"word_type": "verb", "gender": "invalid"}):
+            self.assertEqual(self.post(path, dict(fields, **choices)).status_code, 400)
+        self.assertEqual(len(self.rows("SELECT * FROM cards")), 4)
+
+    def test_classification_uses_only_the_first_back_form(self):
+        with self.app.app_context():
+            card_id = create_card(self.deck_name, {
+                "front": [("der Morgen", "")],
+                "back": [("groß", ""), ("das Haus", "")],
+            }, "")
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=?", (card_id,)),
+                         [{"word_type": None, "gender": None}])
+
+    def test_gender_radio_question_hides_article_and_uses_normal_review_flow(self):
+        card_id = self.german_card()
+        html = self.gender_attempt(card_id).get_data(as_text=True)
+        question_id = self.pending()["question_id"]
+        self.assertIn('<p class="prompt text">Morgen</p>', html)
+        self.assertNotIn("der Morgen", html)
+        self.assertEqual(html.count('type="radio" name="answer"'), 3)
+        self.assertNotIn('name="answer" value="der" checked', html)
+        self.assertNotIn("Expected answer", html)
+        self.assertNotIn("<textarea", html)
+        self.assertIn('fieldset data-study-answer', html)
+        self.assertIn(b"Correct", self.answer("der").data)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+        self.assertEqual(self.finish().status_code, 302)
+        progress = self.rows("SELECT * FROM progress")
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0]["question_id"], question_id)
+        self.assertEqual(progress[0]["reviews"], 1)
+        self.assertEqual(json.loads(progress[0]["state_json"]), {"bucket": 1})
+        self.assertEqual(self.rows("SELECT auto_verdict FROM review_log"),
+                         [{"auto_verdict": "correct"}])
+
+    def test_wrong_empty_and_invalid_gender_answers(self):
+        card_id = self.german_card("die Katze")
+        self.gender_attempt(card_id)
+        invalid = self.post(self.study_url + "/answer",
+                            {"attempt": self.pending()["token"], "answer": "masculine"})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertNotIn("answer", self.pending())
+        self.assertIn(b"Incorrect", self.answer("das").data)
+        self.finish("correct")
+        self.assertEqual(self.rows("SELECT auto_verdict, rating FROM review_log"),
+                         [{"auto_verdict": "incorrect", "rating": "correct"}])
+        self.gender_attempt(card_id)
+        self.assertIn(b"Incorrect", self.answer("").data)
+
+    def test_edit_gender_preserves_remaining_questions_and_schedules(self):
+        self.start()
+        self.answer("bread")
+        self.finish()
+        original = self.rows("SELECT * FROM progress")
+        old_ids = self.rows("SELECT id, kind FROM questions WHERE card_id=?", (self.card_id,))
+        fields = self.edit_payload(front_text=["morning"], front_description=[""],
+                                   back_text=["der Morgen"], back_description=[""],
+                                   word_type="noun", gender="masculine")
+        self.assertEqual(self.post(self.edit_url, fields).status_code, 302)
+        self.gender_attempt(self.card_id)
+        gender_id = self.pending()["question_id"]
+        self.answer("der")
+        self.finish()
+        gender_progress = self.rows("SELECT * FROM progress WHERE question_id=?", (gender_id,))
+        self.assertEqual(self.post(self.edit_url, dict(fields, revision="1", gender="feminine")).status_code, 302)
+        self.assertEqual(self.rows("SELECT * FROM progress WHERE question_id=?", (gender_id,)), gender_progress)
+        with self.app.app_context():
+            self.assertEqual(question_data(gender_id, self.deck_name)["expected"], "die")
+        self.assertEqual(self.post(self.edit_url, dict(fields, revision="2", gender="")).status_code, 302)
+        self.assertEqual(self.rows("SELECT * FROM progress"), original)
+        self.assertEqual(self.rows("SELECT id, kind FROM questions WHERE card_id=?", (self.card_id,)), old_ids)
+        self.assertEqual(self.rows("SELECT * FROM review_log WHERE question_id=?", (gender_id,)), [])
+
+    def test_committed_unknown_or_inferred_classification_does_not_reinfer_on_edit(self):
+        # Old clients omitting the fields must also preserve committed values.
+        fields = self.edit_payload(back_text=["der Morgen"], back_description=[""])
+        self.assertEqual(self.post(self.edit_url, fields).status_code, 302)
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=?", (self.card_id,)),
+                         [{"word_type": None, "gender": None}])
+        card_id = self.german_card()
+        path = f"/decks/{self.deck_name}/cards/{card_id}/edit"
+        fields = self.edit_payload(revision="0", front_text=["night"], front_description=[""],
+                                   back_text=["die Nacht"], back_description=[""], meta="")
+        self.assertEqual(self.post(path, fields).status_code, 302)
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=?", (card_id,)),
+                         [{"word_type": "noun", "gender": "masculine"}])
+        html = self.client.get(path).get_data(as_text=True)
+        self.assertEqual(html.count('data-selection-mode="manual"'), 2)
+        self.assertIn('name="gender" value="masculine" checked', html)
+        self.assertEqual(self.post(path, dict(fields, revision="1", word_type="phrase")).status_code, 302)
+        self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=?", (card_id,)),
+                         [{"word_type": "phrase", "gender": None}])
+        self.assertEqual(self.rows("SELECT * FROM questions WHERE card_id=? AND kind='gender'",
+                                  (card_id,)), [])
+
+    def test_gender_edit_invalidates_active_question(self):
+        card_id = self.german_card()
+        self.gender_attempt(card_id)
+        path = f"/decks/{self.deck_name}/cards/{card_id}/edit"
+        response = self.post(path, self.edit_payload(
+            front_text=["morning"], front_description=[""],
+            back_text=["der Morgen"], back_description=[""], meta="",
+            word_type="noun", gender="feminine"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.answer("der").status_code, 409)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+
+    def test_classification_db_constraints_and_no_persisted_provenance(self):
+        card_id = self.german_card()
+        with self.app.app_context():
+            db = get_db()
+            names = [row["name"] for row in db.execute("PRAGMA table_info(cards)")]
+            self.assertIn("word_type", names)
+            self.assertIn("gender", names)
+            self.assertFalse(any("mode" in name or "automatic" in name for name in names))
+            for column, value in (("word_type", "invalid"), ("gender", "invalid"), ("word_type", "verb")):
+                with self.assertRaises(sqlite3.IntegrityError), transaction(db):
+                    db.execute(f"UPDATE cards SET {column}=? WHERE id=?", (value, card_id))
 
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})

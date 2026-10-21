@@ -13,9 +13,19 @@
     <form method="post" action="{{ url_for('web.answer', deck_name=deck.name) }}">
       {{ csrf() }}
       <input type="hidden" name="attempt" value="{{ pending.token }}">
+      {% if data.question.kind == 'gender' %}
+      <fieldset data-study-answer>
+        <legend>What is the gender of this German word?</legend>
+        {% for value, label in gender_labels.items() %}
+        <label class="radio-label"><input type="radio" name="answer" value="{{ gender_articles[value] }}" {% if loop.first %}autofocus{% endif %}> {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+      <p class="muted">Choose a gender, then check the answer. Enter checks it; arrow keys change your selection. An empty answer counts as incorrect.</p>
+      {% else %}
       <label for="answer">Your {{ 'metadata' if data.question.kind == 'meta' else ('front' if data.question.kind == 'back_to_front' else 'back') }} answer</label>
       <textarea id="answer" data-study-answer name="answer" rows="2" maxlength="500" autofocus enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
       <p class="muted">Exact match, ignoring case only. Enter checks the answer; Shift+Enter adds a newline. You can correct the verdict after reveal. An empty answer counts as incorrect.</p>
+      {% endif %}
       <button class="primary">Check answer</button>
     </form>
     {% else %}
