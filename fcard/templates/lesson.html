@@ -3,6 +3,7 @@
 {% block title %}Lesson · {{ lesson.deck_name }} · fcard{% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='casefold.js') }}" defer></script>
+<script src="{{ url_for('static', filename='answer-match.js') }}" defer></script>
 <script src="{{ url_for('static', filename='lesson-sync.js') }}" defer></script>
 <script src="{{ url_for('static', filename='lesson.js') }}" defer></script>
 {% endblock %}

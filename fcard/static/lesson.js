@@ -94,7 +94,7 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
       const check = node('button', 'primary', 'Check answer');
       form.append(node('p', 'muted', question.kind === 'gender'
         ? 'Choose a gender, then check. Enter checks; arrow keys change the selection. Empty answers count as incorrect.'
-        : 'Exact match, ignoring case only. Enter checks; Shift+Enter adds a newline. Empty answers count as incorrect.'), check);
+        : 'Case is ignored; ß/ss and ü/ue match, but u does not match ü. Spaces and punctuation still matter. Enter checks; Shift+Enter adds a newline. Empty answers count as incorrect.'), check);
       form.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229 || event.target === check) return;
         event.preventDefault(); form.requestSubmit();
@@ -103,7 +103,7 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
         event.preventDefault();
         if (sync.blocked || endRequested) return;
         const answer = question.kind === 'gender' ? [...form.querySelectorAll('input')].find((i) => i.checked)?.value || '' : input.value;
-        const auto = fcardCasefold(answer) === question.expected_key ? 'correct' : 'incorrect';
+        const auto = fcardAnswersMatch(answer, question.expected) ? 'correct' : 'incorrect';
         ephemeral.set(cursor, { answer, auto });
         ratings.push({ rating: question.defaults[auto], control: null });
         sync.changed(); render();

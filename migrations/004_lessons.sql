@@ -11,7 +11,7 @@ CREATE TABLE lessons (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     completed_at INTEGER,
-    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),˝
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
     state_json TEXT NOT NULL DEFAULT '{"cursor":0,"ratings":[]}' CHECK (json_valid(state_json)),
     skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped BETWEEN 0 AND 20)
 );

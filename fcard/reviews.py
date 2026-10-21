@@ -1,13 +1,19 @@
 """Read scheduling candidates. Lesson completion owns all progress writes."""
 
 import json
+import unicodedata
 
 from .db import get_db
 from .schedulers import Candidate
 
 
+def answer_key(text):
+    """German answer spelling equivalences; deliberately stricter than search."""
+    return unicodedata.normalize("NFC", text).casefold().replace("ü", "ue")
+
+
 def verdict(answer, expected):
-    return "correct" if answer.casefold() == expected.casefold() else "incorrect"
+    return "correct" if answer_key(answer) == answer_key(expected) else "incorrect"
 
 
 def candidates(deck_name, user_id, default_algorithm):

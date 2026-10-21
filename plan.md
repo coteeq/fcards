@@ -68,9 +68,11 @@
   (current verdict revealed). Each entry contains only final `rating` and nullable
   scheduler `control`, validated against its item's snapshotted options.
 - Raw submitted answers, automatic verdicts, correction flags, and correction history
-  never persist. Answer checking uses Unicode casefold only, with no whitespace,
-  punctuation, accent, or transliteration normalization. Gender choices submit an
-  article.
+  never persist. Answer checking uses NFC and Unicode casefold, plus `ü` → `ue`.
+  Thus `ß/ss` and `ü/ue` match; plain `u` does not match `ü`. Spaces, punctuation,
+  and other accents stay significant. Matching uses original expected text, not the
+  snapshot's legacy casefold key, so saved lessons use the current rules unchanged.
+  Gender choices submit an article.
   Both automatic and manually corrected choices become indistinguishable final ratings.
 - Async sync changes only lesson state/revision/time, never scheduling progress. Writers
   compare the lesson revision under an immediate transaction. An identical retried state

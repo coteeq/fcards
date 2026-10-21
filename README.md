@@ -127,8 +127,8 @@ The default database path is
 4. Every card has front → back and back → front questions, each scheduled independently.
    Nonblank metadata adds a question; a noun with a known gender adds a separate gender
    question. German belongs on **Back**; classification uses only its first form.
-5. Type an answer and check it. Unicode case folding is the only normalization:
-   spaces, accents, and punctuation still matter. Only the canonical first form is
+5. Type an answer and check it. Case is ignored, `ß`/`ss` and `ü`/`ue` match, but
+   plain `u` does **not** match `ü`. Spaces, other accents, and punctuation still matter. Only the canonical first form is
    automatically accepted. Enter checks the answer; Shift+Enter inserts a newline.
    Gender questions instead offer radio choices, with no choice selected initially.
    They show the German Back word without its leading article, so the prompt does not
@@ -167,7 +167,11 @@ If no questions are eligible, no lesson is created.
 A lesson is available at `/lessons/<uuid>`, with owner-only JSON at
 `/api/lessons/<uuid>`. The JSON deliberately includes answers: this is a personal study
 tool, not an exam system. Checking uses the bundled full Unicode casefold map, not
-JavaScript's narrower `toLowerCase()`; whitespace, accents, and punctuation still matter.
+JavaScript's narrower `toLowerCase()`. Canonically equivalent Unicode spellings are
+normalized with NFC, and `ü`/`ue` are equivalent (including uppercase). Plain `u` does
+not match `ü` or `ue`. Other accents, whitespace, and punctuation remain significant.
+The matcher normalizes the original expected text, so saved lessons also receive these
+rules without migrating or rewriting their snapshots.
 No network request is required to check or advance.
 
 Cursor and **final** rating/adjustment choices sync asynchronously. Raw answers,
@@ -339,4 +343,5 @@ node tests/test_card_entry.cjs
 node tests/test_word_classification.cjs
 node tests/test_lesson_sync.cjs
 node tests/test_lesson_ui.cjs
+node tests/test_answer_match.cjs
 ```

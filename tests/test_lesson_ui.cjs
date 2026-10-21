@@ -16,7 +16,7 @@ async function setup({ cursor = 0, ratings = [], questions = Array.from({ length
   const status = element('p', 'data-sync-status'), error = element('p', 'data-lesson-error');
   const useSaved = element('button', 'data-use-saved'), stage = element('div', 'data-lesson-stage');
   root.append(csrf, status, error, useSaved, stage); s.doc.append(root);
-  s.load('casefold.js'); s.load('lesson-sync.js'); s.load('lesson.js');
+  s.load('casefold.js'); s.load('answer-match.js'); s.load('lesson-sync.js'); s.load('lesson.js');
   const data = { id: 'uuid', revision: 0, state: { cursor, ratings }, questions, completed_at, skipped: 0 };
   await s.respond(0, data);
   return { ...s, stage, root, status, error, data, get focus() { return s.focused; } };
@@ -45,6 +45,15 @@ async function test(name, run) { await run(); console.log('ok:', name); }
     assert.equal(s.requests[1].options.headers['X-CSRF-Token'], 'csrf-token');
     assert.equal(s.requests[1].options.keepalive, true);
     assert.doesNotMatch([...s.saved.values()].join(''), /STRASSE|auto_verdict|corrected/);
+  });
+  await test('saved lesson snapshots use the upgraded matcher without rewriting their old key', async () => {
+    for (const [answer, expectedVerdict] of [['frueh', 'correct'], ['FRÜH', 'correct'], ['fruh', 'incorrect']]) {
+      const questions = Array.from({ length: 20 }, () => question({ expected: 'früh', expected_key: 'früh' }));
+      const s = await setup({ questions });
+      const form = s.stage.querySelector('form'); form.querySelector('textarea').value = answer; form.emit('submit');
+      assert.match(s.stage.textContent, new RegExp('Automatic verdict: ' + expectedVerdict));
+      assert.equal(s.requests.length, 1);
+    }
   });
   await test('gender uses unselected radios and local grading; empty answer is incorrect', async () => {
     const questions = Array.from({ length: 20 }, () => question({ kind: 'gender', prompt: 'Morgen', expected: 'der', expected_key: 'der' }));

@@ -50,6 +50,9 @@ class LessonTest(unittest.TestCase):
         html = self.client.get("/lessons/" + lesson_id).get_data(as_text=True)
         self.assertIn("static/lesson.js", html)
         self.assertIn("static/casefold.js", html)
+        self.assertIn("static/answer-match.js", html)
+        self.assertLess(html.index("static/casefold.js"), html.index("static/answer-match.js"))
+        self.assertLess(html.index("static/answer-match.js"), html.index("static/lesson.js"))
         self.assertIn("data-lesson-stage", html)
         self.assertIn("noscript", html)
 
