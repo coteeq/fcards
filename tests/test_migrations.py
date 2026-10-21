@@ -2,13 +2,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
 from flask import Flask
 
 from fcard import create_app
-from fcard.db import close_db, get_db, initialize
+from fcard.db import close_db, get_db, initialize, migrate_v2_to_v3, transaction
 
 
 class MigrationTest(unittest.TestCase):
@@ -48,7 +50,8 @@ class MigrationTest(unittest.TestCase):
     def snapshot(self):
         with sqlite3.connect(self.database) as db:
             return {table: db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
-                    for table in ("users", "decks", "cards", "card_forms", "questions", "progress", "review_log")}
+                    for table in ("users", "decks", "cards", "card_forms", "questions", "progress", "review_log")
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone()}
 
     def upgrade(self):
         return create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})
@@ -57,10 +60,13 @@ class MigrationTest(unittest.TestCase):
         app = self.upgrade()
         with app.app_context():
             db = get_db()
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
             for table, rows in self.before.items():
+                if table == "review_log":
+                    self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name=\'review_log\'").fetchone())
+                    continue
                 if table == "cards":
                     query = "SELECT id, deck_name, revision, meta, created_at FROM cards ORDER BY rowid"
                 elif table == "questions":
@@ -112,6 +118,46 @@ class MigrationTest(unittest.TestCase):
         with sqlite3.connect(self.database) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
 
+    def test_separate_script_upgrades_v3_and_backup_retains_old_history(self):
+        old_app = Flask(__name__)
+        old_app.config["DATABASE"] = self.database
+        old_app.teardown_appcontext(close_db)
+        with old_app.app_context():
+            db = get_db()
+            db.execute("PRAGMA foreign_keys=OFF")
+            with transaction(db):
+                migrate_v2_to_v3(db)
+        before = self.snapshot()
+        backup = str(Path(self.temp.name) / "backup.sqlite3")
+        runner = Path(__file__).resolve().parents[1] / "migrations/migrate.py"
+        result = subprocess.run([sys.executable, str(runner), self.database, "--backup", backup],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Schema 3 -> 4", result.stdout)
+        after = self.snapshot()
+        for table in before:
+            if table != "review_log":
+                self.assertEqual(after[table], before[table], table)
+        self.assertNotIn("review_log", after)
+        with sqlite3.connect(backup) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(db.execute("SELECT * FROM review_log ORDER BY rowid").fetchall(),
+                             before["review_log"])
+        again = subprocess.run([sys.executable, str(runner), self.database], capture_output=True)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(self.snapshot(), after)
+        refuse = subprocess.run([sys.executable, str(runner), self.database, "--backup", backup],
+                                capture_output=True)
+        self.assertNotEqual(refuse.returncode, 0)
+        self.assertEqual(self.snapshot(), after)
+
+    def test_script_refuses_missing_database_without_creating_a_replacement(self):
+        missing = Path(self.temp.name) / "missing.sqlite3"
+        runner = Path(__file__).resolve().parents[1] / "migrations/migrate.py"
+        result = subprocess.run([sys.executable, str(runner), str(missing)], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(missing.exists())
+
     def test_concurrent_upgrade_is_once_only_and_preserves_all_old_progress(self):
         def upgrade(_):
             app = self.upgrade()
@@ -120,6 +166,6 @@ class MigrationTest(unittest.TestCase):
                 return (db.execute("PRAGMA user_version").fetchone()[0],
                         db.execute("SELECT COUNT(*) FROM questions WHERE kind='gender'").fetchone()[0])
         with ThreadPoolExecutor(max_workers=4) as pool:
-            self.assertEqual(list(pool.map(upgrade, range(8))), [(3, 4)] * 8)
+            self.assertEqual(list(pool.map(upgrade, range(8))), [(4, 4)] * 8)
         self.assertEqual(self.snapshot()["progress"], self.before["progress"])
-        self.assertEqual(self.snapshot()["review_log"], self.before["review_log"])
+        self.assertNotIn("review_log", self.snapshot())

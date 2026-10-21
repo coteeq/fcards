@@ -19,9 +19,8 @@
   </table>
 </section>
 <div class="tab-toolbar">
-  <a class="button primary" href="{{ url_for('web.study', deck_name=deck.name) }}">Study</a>
+  <form method="post" action="{{ url_for('web.create_lesson', deck_name=deck.name) }}">{{ csrf() }}<button class="primary">Create lesson · 20 questions</button></form>
   <a class="button" href="{{ url_for('web.new_card', deck_name=deck.name) }}">Add card</a>
-  <a class="button" href="{{ url_for('web.history', deck_name=deck.name) }}">Your review history</a>
 </div>
 <section class="card">
   <h3 class="card-header">Quick add</h3>

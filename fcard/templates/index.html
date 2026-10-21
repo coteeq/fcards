@@ -1,9 +1,20 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import word_search with context %}
+{% from 'macros.html' import word_search, csrf with context %}
 {% block title %}Decks · fcard{% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='search.js') }}" defer></script>{% endblock %}
 {% block content %}
 {{ word_search() }}
+{% if lessons %}
+<section class="card">
+  <h2 class="card-header">Uncompleted lessons</h2>
+  <ul class="lesson-list card-body">
+    {% for lesson in lessons %}
+    <li><a href="{{ url_for('web.lesson', lesson_id=lesson.id) }}">{{ lesson.deck_name }} · {{ lesson.answered }}/20 checked{% if lesson.answered == 20 %} · End lesson{% endif %}</a>
+      <small class="muted">{{ lesson.created_at | timestamp }}</small></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 <div class="tab-toolbar">
   <a class="button primary" href="{{ url_for('web.new_deck') }}">New deck</a>
 </div>
@@ -17,7 +28,7 @@
     <tr><th scope="row">Your questions</th><td><span class="badge">{{ deck.seen_count }} / {{ deck.question_count }} seen</span></td></tr>
   </table>
   <div class="card-body actions">
-    <a class="button" href="{{ url_for('web.study', deck_name=deck.name) }}">Study</a>
+    <form method="post" action="{{ url_for('web.create_lesson', deck_name=deck.name) }}">{{ csrf() }}<button class="primary">Create lesson · 20 questions</button></form>
     <a class="button" href="{{ url_for('web.deck_detail', deck_name=deck.name) }}">Browse</a>
     <a class="button" href="{{ url_for('web.new_card', deck_name=deck.name) }}">Add card</a>
   </div>

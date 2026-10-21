@@ -140,7 +140,7 @@ def update_card(deck_name, card_id, forms, meta, revision, word_type=INFER, gend
                 "ON CONFLICT (card_id, kind) DO NOTHING", (card_id,),
             )
         else:
-            # Explicitly removing metadata also removes that question's progress/log.
+            # Removing metadata deletes its progress, but saved lesson snapshots survive.
             db.execute("DELETE FROM questions WHERE card_id = ? AND kind = 'meta'", (card_id,))
         if word_type == "noun" and gender:
             db.execute(
@@ -148,7 +148,7 @@ def update_card(deck_name, card_id, forms, meta, revision, word_type=INFER, gend
                 "ON CONFLICT (card_id, kind) DO NOTHING", (card_id,),
             )
         else:
-            # As with metadata, explicitly removing the question cascades only its history.
+            # Lesson snapshots survive; only this question's scheduling progress is removed.
             db.execute("DELETE FROM questions WHERE card_id = ? AND kind = 'gender'", (card_id,))
 
 

@@ -10,7 +10,7 @@ import unittest
 from fcard import create_app
 from fcard.db import get_db, transaction
 from fcard.models import create_card, create_deck, question_data
-from fcard.reviews import finalize, StaleReview, verdict
+from fcard.reviews import verdict
 from fcard.schedulers import Buckets, TimeBased, Transition
 
 
@@ -78,26 +78,19 @@ class AppTest(unittest.TestCase):
         with self.app.app_context():
             return [dict(row) for row in get_db().execute(sql, params).fetchall()]
 
-    def pending(self):
-        return self.session()["study"]
 
-    def start(self):
-        response = self.client.get(self.study_url)
-        self.assertEqual(response.status_code, 200)
-        return response
 
-    def answer(self, text):
-        return self.post(self.study_url + "/answer", {
-            "attempt": self.pending()["token"], "answer": text,
-        }, follow=True)
 
-    def finish(self, rating=None, control=None):
-        data = {"attempt": self.pending()["token"]}
-        if rating is not None:
-            data["rating"] = rating
-        if control is not None:
-            data["control"] = control
-        return self.post(self.study_url + "/finish", data)
+
+
+
+
+
+    def seed_review(self, question_id=None):
+        question_id = question_id or self.rows("SELECT id FROM questions ORDER BY id LIMIT 1")[0]["id"]
+        with self.app.app_context(), transaction(get_db()) as db:
+            db.execute("INSERT INTO progress VALUES (?, ?, 'buckets-v1', ?, NULL, 123, 1, 0)",
+                       (self.alice, question_id, '{"bucket":1}'))
 
     def test_login_is_case_sensitive_and_users_resume(self):
         self.post("/logout")
@@ -295,112 +288,26 @@ class AppTest(unittest.TestCase):
                 create_card(self.deck_name, {"front": [], "back": [("y", "")]}, "")
         self.assertEqual(len(self.rows("SELECT * FROM cards")), 1)
 
-    def test_answer_no_leak_reveal_and_finalize(self):
-        response = self.start()
-        self.assertIn(b"Brot", response.data)
-        self.assertNotIn(b"bread", response.data)
-        self.assertNotIn(b"Brote", response.data)
-        response = self.answer("BREAD")
-        self.assertIn(b"Correct", response.data)
-        self.assertIn(b"bread", response.data)
-        self.assertIn(b"Brote", response.data)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        self.assertEqual(self.finish().status_code, 302)
-        progress = self.rows("SELECT * FROM progress")[0]
-        self.assertEqual((progress["reviews"], progress["lapses"]), (1, 0))
-        self.assertIsNone(progress["due_at"])
-        self.assertIsInstance(progress["last_reviewed_at"], int)
-        self.assertEqual(json.loads(progress["state_json"]), {"bucket": 1})
-        log = self.rows("SELECT * FROM review_log")[0]
-        self.assertEqual((log["rating"], log["auto_verdict"]), ("correct", "correct"))
-        self.assertEqual(log["before_state_json"], "null")
-        self.assertEqual(self.client.get(f"/decks/{self.deck_name}/history").status_code, 200)
-        self.assertEqual(self.client.get(f"/decks/{self.deck_name}").status_code, 200)
 
-    def test_wrong_answer_can_be_corrected_and_extra_control_logged(self):
-        self.start()
-        self.assertIn(b"Incorrect", self.answer("bun").data)
-        self.assertEqual(self.finish("correct", "up5").status_code, 302)
-        log = self.rows("SELECT * FROM review_log")[0]
-        self.assertEqual((log["auto_verdict"], log["rating"], log["control"]),
-                         ("incorrect", "correct", "up5"))
-        self.assertEqual(json.loads(log["after_state_json"]), {"bucket": 6})
-        self.assertEqual(self.rows("SELECT lapses FROM progress")[0]["lapses"], 0)
 
-    def test_correct_answer_can_be_marked_wrong(self):
-        self.start()
-        self.answer("bread")
-        self.finish("incorrect")
-        progress = self.rows("SELECT * FROM progress")[0]
-        self.assertEqual(progress["lapses"], 1)
-        self.assertEqual(json.loads(progress["state_json"]), {"bucket": 0})
+
+
+
 
     def test_exact_comparison_and_empty_answers(self):
         self.assertEqual(verdict("Straße", "STRASSE"), "correct")
         self.assertEqual(verdict("Bread", "bread"), "correct")
         for answer in (" bread", "bread ", "bréad", "bread.", ""):
             self.assertEqual(verdict(answer, "bread"), "incorrect")
-        self.start()
-        self.answer("")
-        self.finish()
-        self.assertEqual(self.rows("SELECT rating FROM review_log")[0]["rating"], "incorrect")
 
-    def test_question_kinds_and_users_progress_independently(self):
-        for expected in ("bread", "Brot", "neuter"):
-            self.start()
-            self.answer(expected)
-            self.finish()
-        progress = self.rows("SELECT * FROM progress")
-        self.assertEqual(len(progress), 3)
-        self.assertTrue(all(p["reviews"] == 1 and p["lapses"] == 0 for p in progress))
-        bob = self.app.test_client()
-        self.login("Bob", bob)
-        response = bob.get(f"/decks/{self.deck_name}")
-        self.assertIn(b"0 seen", response.data)
-        bob.get(self.study_url)
-        self.assertEqual(self.session(bob)["study"]["revision"], 0)
-        self.assertEqual(len(self.rows("SELECT * FROM progress")), 3)
 
-    def test_replay_cannot_double_advance_or_log(self):
-        self.start()
-        self.answer("bread")
-        old_session = self.session()
-        payload = {"attempt": self.pending()["token"]}
-        self.assertEqual(self.post(self.study_url + "/finish", payload).status_code, 302)
-        self.assertEqual(self.post(self.study_url + "/finish", payload).status_code, 409)
-        with self.client.session_transaction() as session:
-            session.clear()
-            session.update(old_session)
-        self.assertEqual(self.post(self.study_url + "/finish", payload).status_code, 409)
-        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 1)
-        self.assertEqual(self.rows("SELECT reviews FROM progress")[0]["reviews"], 1)
 
-    def test_invalid_order_tokens_ratings_and_pause(self):
-        self.start()
-        self.assertEqual(self.finish().status_code, 409)
-        self.assertEqual(self.post(self.study_url + "/answer", {
-            "attempt": "old", "answer": "bread",
-        }).status_code, 409)
-        self.answer("bread")
-        self.assertEqual(self.answer("bread").status_code, 409)
-        self.assertEqual(self.finish("forged").status_code, 400)
-        self.assertEqual(self.finish("correct", "forged").status_code, 400)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        response = self.post(self.study_url + "/pause", {"attempt": self.pending()["token"]})
-        self.assertEqual(response.status_code, 302)
-        self.assertNotIn("study", self.session())
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
 
-    def test_refresh_preserves_question_and_reveal(self):
-        self.start()
-        before = self.pending()
-        self.start()
-        self.assertEqual(self.pending(), before)
-        self.answer("bread")
-        response = self.start()
-        self.assertIn(b"Expected answer", response.data)
-        self.assertEqual(self.pending()["answer"], "bread")
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+
+
+
+
+
 
     def test_csrf_theme_escaping_and_script_policy(self):
         self.assertEqual(self.client.post("/logout").status_code, 400)
@@ -426,58 +333,18 @@ class AppTest(unittest.TestCase):
             blank = create_deck("Blank", "", self.alice)
         self.assertIn(b"Next", self.client.get(f"/decks/{empty}").data)
         self.assertIn(b"Previous", self.client.get(f"/decks/{empty}?page=2").data)
-        self.assertIn(b"No questions available", self.client.get(f"/decks/{blank}/study").data)
+        self.assertIn(b"No questions are available", self.post(f"/decks/{blank}/lessons", follow=True).data)
         self.assertEqual(self.client.post("/login", data=b"x" * 300_000,
                                          content_type="application/x-www-form-urlencoded").status_code, 413)
 
-    def test_default_change_preserves_recorded_algorithm(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
-        self.app.config["SCHEDULERS"]["clock-test"] = ClockScheduler()
-        self.app.config["DEFAULT_ALGORITHM"] = "clock-test"
-        self.start()
-        self.assertEqual(self.pending()["algorithm"], "clock-test")
-        self.answer("Brot")
-        self.finish()
-        self.assertIsNotNone(self.rows("SELECT due_at FROM progress "
-                                      "WHERE algorithm = 'clock-test'")[0]["due_at"])
-        self.start()
-        self.assertEqual(self.pending()["algorithm"], "buckets-v1")
-        self.assertEqual(self.pending()["revision"], 1)
 
-    def test_unavailable_scheduler_is_not_silently_replaced(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
-        with self.app.app_context(), transaction(get_db()) as db:
-            db.execute("UPDATE progress SET algorithm = 'unknown-v1'")
-        self.assertEqual(self.client.get(self.study_url).status_code, 503)
 
-    def test_concurrent_finalization_commits_only_once(self):
-        self.start()
-        self.answer("bread")
-        pending = self.pending()
 
-        def finish_review(_):
-            with self.app.app_context():
-                try:
-                    finalize(self.alice, self.deck_name, pending, "correct", None,
-                             self.app.config["SCHEDULERS"], 1000)
-                    return "committed"
-                except StaleReview:
-                    return "stale"
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(finish_review, range(2)))
-        self.assertCountEqual(results, ["committed", "stale"])
-        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 1)
-        self.assertEqual(self.rows("SELECT reviews FROM progress")[0]["reviews"], 1)
+
 
     def test_new_cards_appear_for_existing_users(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
+        self.seed_review()
         with self.app.app_context():
             create_card(self.deck_name, {
                 "front": [("Haus", "")], "back": [("house", "")],
@@ -525,9 +392,7 @@ class AppTest(unittest.TestCase):
                                (name, self.alice))
 
     def test_edit_form_preserves_question_progress(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
+        self.seed_review()
         questions = self.rows("SELECT * FROM questions")
         progress = self.rows("SELECT * FROM progress")
         response = self.client.get(self.edit_url)
@@ -541,7 +406,6 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT * FROM questions"), questions)
         self.assertEqual(self.rows("SELECT * FROM progress"), progress)
         self.assertEqual(self.rows("SELECT revision FROM cards")[0]["revision"], 1)
-        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 1)
         with self.app.app_context():
             data = question_data(questions[0]["id"], self.deck_name)
             self.assertEqual((data["prompt"], data["expected"]), ("Laib", "loaf"))
@@ -580,16 +444,13 @@ class AppTest(unittest.TestCase):
         )).status_code, 400)
 
     def test_edit_metadata_removal_and_readdition(self):
-        for expected in ("bread", "Brot", "neuter"):
-            self.start()
-            self.answer(expected)
-            self.finish()
+        for question in self.rows("SELECT id FROM questions"):
+            self.seed_review(question["id"])
         self.assertEqual(len(self.rows("SELECT * FROM progress")), 3)
         response = self.post(self.edit_url, self.edit_payload(meta=""))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(len(self.rows("SELECT * FROM questions")), 2)
         self.assertEqual(len(self.rows("SELECT * FROM progress")), 2)
-        self.assertEqual(len(self.rows("SELECT * FROM review_log")), 2)
         response = self.post(self.edit_url, self.edit_payload(meta="gender"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(len(self.rows("SELECT * FROM questions")), 3)
@@ -617,22 +478,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.client.get(path).status_code, 404)
         self.assertEqual(self.post(path, self.edit_payload()).status_code, 404)
 
-    def test_card_edit_invalidates_unanswered_and_revealed_attempts(self):
-        self.start()
-        self.post(self.edit_url, self.edit_payload(back_text=["loaf"]))
-        self.assertEqual(self.answer("bread").status_code, 409)
-        self.start()
-        self.answer("loaf")
-        pending = self.pending()
-        self.post(self.edit_url, self.edit_payload(back_text=["bread"]))
-        with self.app.app_context(), self.assertRaises(StaleReview):
-            finalize(self.alice, self.deck_name, pending, "correct", None,
-                     self.app.config["SCHEDULERS"], 1000)
-        self.assertEqual(self.finish().status_code, 409)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
-        self.start()
-        self.assertNotIn("answer", self.pending())
+
 
     def test_quick_add_and_validation(self):
         path = f"/decks/{self.deck_name}/cards/quick"
@@ -666,7 +512,8 @@ class AppTest(unittest.TestCase):
         self.assertIn("quickAdd.requestSubmit()", script)
 
     def test_header_is_fixed_and_username_menu_has_explicit_themes(self):
-        for path in ("/", f"/decks/{self.deck_name}", self.study_url, self.edit_url, "/new-deck"):
+        lesson_url = self.post(f"/decks/{self.deck_name}/lessons").headers["Location"]
+        for path in ("/", f"/decks/{self.deck_name}", lesson_url, self.edit_url, "/new-deck"):
             response = self.client.get(path)
             html = response.get_data(as_text=True)
             header = re.search(r"<header>(.*?)</header>", html, re.S).group(1)
@@ -686,48 +533,15 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.post("/logout").status_code, 302)
         self.assertNotIn("user_id", self.session())
 
-    def test_study_enter_handler_is_external_and_scoped(self):
-        response = self.start()
-        self.assertIn(b'data-study-answer', response.data)
-        self.assertIn(b'enterkeyhint="done"', response.data)
-        self.assertIn(b'src="/static/study.js" defer', response.data)
-        self.assertNotIn(b"study.js", self.client.get("/").data)
-        with self.client.get("/static/study.js") as script:
-            self.assertEqual(script.status_code, 200)
 
-    def test_finalize_card_is_collapsed_and_next_is_outside(self):
-        self.start()
-        response = self.answer("bread")
-        html = response.get_data(as_text=True)
-        details = re.search(r'<details class="card">(.*?)</details>', html, re.S)
-        self.assertIsNotNone(details)
-        self.assertIn("Finalize review", details.group(1))
-        self.assertIn('name="rating"', details.group(1))
-        self.assertIn('name="control"', details.group(1))
-        self.assertNotIn("<details", details.group(1))
-        self.assertNotIn("<button", details.group(1))
-        self.assertRegex(html[details.end():], r'<button class="primary" autofocus>Next question')
-        self.assertEqual(self.finish().status_code, 302)
-        self.assertEqual(self.rows("SELECT rating FROM review_log")[0]["rating"], "correct")
 
-    def test_leaving_study_keeps_pending_but_discard_clears_it(self):
-        self.start()
-        self.answer("bread")
-        before = self.pending()
-        self.client.get(f"/decks/{self.deck_name}")
-        self.assertEqual(self.pending(), before)
-        self.assertIn(b"Expected answer", self.start().data)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        response = self.post(self.study_url + "/pause", {"attempt": before["token"]})
-        self.assertEqual(response.status_code, 302)
-        self.assertNotIn("study", self.session())
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+
+
+
 
     def test_sides_layout_is_shared_and_descriptions_stay_in_form_rows(self):
         browse = self.client.get(f"/decks/{self.deck_name}").get_data(as_text=True)
-        self.start()
-        revealed = self.answer("bread").get_data(as_text=True)
-        for html in (browse, revealed):
+        for html in (browse,):
             sides = re.findall(
                 r'<section class="card-side card-side--(front|back)"[^>]*>(.*?)</section>',
                 html, re.S,
@@ -831,9 +645,7 @@ class AppTest(unittest.TestCase):
             self.assertEqual(self.search_result_ids(query)[0], [card_id])
 
     def test_search_returns_each_card_once_and_keeps_own_progress(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
+        self.seed_review()
         ids, response = self.search_result_ids("brot")
         self.assertEqual(ids, [self.card_id])
         self.assertIn(b"1/3 questions seen", response.data)
@@ -878,15 +690,14 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.app.test_client().get("/search?q=brot").status_code, 302)
 
     def test_search_forms_are_get_requests_and_do_not_change_pending_review(self):
-        self.start()
-        self.answer("bread")
-        pending = self.pending()
+        self.post(f"/decks/{self.deck_name}/lessons")
+        pending = self.rows("SELECT * FROM lessons")
         for path in ("/", f"/decks/{self.deck_name}", "/search"):
             html = self.client.get(path).get_data(as_text=True)
             self.assertIn('class="word-search" method="get" action="/search"', html)
         self.search_result_ids("brot")
-        self.assertEqual(self.pending(), pending)
-        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+        self.assertEqual(self.rows("SELECT * FROM lessons"), pending)
+
 
     def test_search_uses_current_text_after_edit(self):
         self.assertEqual(self.search_result_ids("brot")[0], [self.card_id])
@@ -960,9 +771,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.search_result_ids("live")[0]), 10)
 
     def test_live_search_limits_auth_and_does_not_change_progress(self):
-        self.start()
-        self.answer("bread")
-        pending = self.pending()
+        self.post(f"/decks/{self.deck_name}/lessons")
+        pending = self.rows("SELECT * FROM lessons")
         for query in ("", "!!!", "中文"):
             data = self.client.get("/search/live", query_string={"q": query}).get_json()
             self.assertFalse(data["searchable"])
@@ -974,9 +784,9 @@ class AppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertIn("error", response.get_json())
         self.assertEqual(self.client.get("/search/live?q=brot").status_code, 200)
-        self.assertEqual(self.pending(), pending)
+        self.assertEqual(self.rows("SELECT * FROM lessons"), pending)
         self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+
 
     def test_live_search_script_and_accessible_panel_are_on_search_pages(self):
         for path in ("/", f"/decks/{self.deck_name}", "/search"):
@@ -1089,9 +899,8 @@ class AppTest(unittest.TestCase):
         self.assertTrue(data["more"])
 
     def test_suggestions_validate_csrf_payload_and_do_not_change_reviews(self):
-        self.start()
-        self.answer("bread")
-        pending = self.pending()
+        self.post(f"/decks/{self.deck_name}/lessons")
+        pending = self.rows("SELECT * FROM lessons")
         self.assertEqual(self.client.post("/cards/suggestions", json={"words": ["brot"]}).status_code, 400)
         for words in (None, "brot", [1], ["x" * 501], ["x"] * 201):
             self.assertEqual(self.suggestion_request(words).status_code, 400)
@@ -1100,9 +909,9 @@ class AppTest(unittest.TestCase):
             self.assertEqual(self.suggestion_request(words).get_json()["results"], [])
         response = self.suggestion_request(["brot"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(self.pending(), pending)
+        self.assertEqual(self.rows("SELECT * FROM lessons"), pending)
         self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+
 
     def test_entry_enhancement_scripts_and_hints_are_on_both_forms(self):
         for path in (f"/decks/{self.deck_name}", f"/decks/{self.deck_name}/cards/new", self.edit_url):
@@ -1123,18 +932,7 @@ class AppTest(unittest.TestCase):
                 "front": [("morning", "")], "back": [(back, "")],
             }, "", **choices)
 
-    def gender_attempt(self, card_id):
-        self.start()
-        question_id = self.rows("SELECT id FROM questions WHERE card_id=? AND kind='gender'",
-                                (card_id,))[0]["id"]
-        revision = self.rows("SELECT revision FROM cards WHERE id=?", (card_id,))[0]["revision"]
-        progress = self.rows("SELECT reviews FROM progress WHERE user_id=? AND question_id=?",
-                             (self.alice, question_id))
-        with self.client.session_transaction() as session:
-            session["study"] = dict(session["study"], question_id=question_id,
-                                    card_revision=revision,
-                                    revision=progress[0]["reviews"] if progress else 0)
-        return self.start()
+
 
     def test_quick_add_infers_gender_from_back_not_front(self):
         for back, gender in ((" der Morgen ", "masculine"), ("die Katze", "feminine"),
@@ -1190,56 +988,20 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT word_type, gender FROM cards WHERE id=?", (card_id,)),
                          [{"word_type": None, "gender": None}])
 
-    def test_gender_radio_question_hides_article_and_uses_normal_review_flow(self):
-        card_id = self.german_card()
-        html = self.gender_attempt(card_id).get_data(as_text=True)
-        question_id = self.pending()["question_id"]
-        self.assertIn('<p class="prompt text">Morgen</p>', html)
-        self.assertNotIn("der Morgen", html)
-        self.assertEqual(html.count('type="radio" name="answer"'), 3)
-        self.assertNotIn('name="answer" value="der" checked', html)
-        self.assertNotIn("Expected answer", html)
-        self.assertNotIn("<textarea", html)
-        self.assertIn('fieldset data-study-answer', html)
-        self.assertIn(b"Correct", self.answer("der").data)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
-        self.assertEqual(self.finish().status_code, 302)
-        progress = self.rows("SELECT * FROM progress")
-        self.assertEqual(len(progress), 1)
-        self.assertEqual(progress[0]["question_id"], question_id)
-        self.assertEqual(progress[0]["reviews"], 1)
-        self.assertEqual(json.loads(progress[0]["state_json"]), {"bucket": 1})
-        self.assertEqual(self.rows("SELECT auto_verdict FROM review_log"),
-                         [{"auto_verdict": "correct"}])
 
-    def test_wrong_empty_and_invalid_gender_answers(self):
-        card_id = self.german_card("die Katze")
-        self.gender_attempt(card_id)
-        invalid = self.post(self.study_url + "/answer",
-                            {"attempt": self.pending()["token"], "answer": "masculine"})
-        self.assertEqual(invalid.status_code, 400)
-        self.assertNotIn("answer", self.pending())
-        self.assertIn(b"Incorrect", self.answer("das").data)
-        self.finish("correct")
-        self.assertEqual(self.rows("SELECT auto_verdict, rating FROM review_log"),
-                         [{"auto_verdict": "incorrect", "rating": "correct"}])
-        self.gender_attempt(card_id)
-        self.assertIn(b"Incorrect", self.answer("").data)
+
+
 
     def test_edit_gender_preserves_remaining_questions_and_schedules(self):
-        self.start()
-        self.answer("bread")
-        self.finish()
+        self.seed_review()
         original = self.rows("SELECT * FROM progress")
         old_ids = self.rows("SELECT id, kind FROM questions WHERE card_id=?", (self.card_id,))
         fields = self.edit_payload(front_text=["morning"], front_description=[""],
                                    back_text=["der Morgen"], back_description=[""],
                                    word_type="noun", gender="masculine")
         self.assertEqual(self.post(self.edit_url, fields).status_code, 302)
-        self.gender_attempt(self.card_id)
-        gender_id = self.pending()["question_id"]
-        self.answer("der")
-        self.finish()
+        gender_id = self.rows("SELECT id FROM questions WHERE kind=\'gender\'")[0]["id"]
+        self.seed_review(gender_id)
         gender_progress = self.rows("SELECT * FROM progress WHERE question_id=?", (gender_id,))
         self.assertEqual(self.post(self.edit_url, dict(fields, revision="1", gender="feminine")).status_code, 302)
         self.assertEqual(self.rows("SELECT * FROM progress WHERE question_id=?", (gender_id,)), gender_progress)
@@ -1248,7 +1010,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.post(self.edit_url, dict(fields, revision="2", gender="")).status_code, 302)
         self.assertEqual(self.rows("SELECT * FROM progress"), original)
         self.assertEqual(self.rows("SELECT id, kind FROM questions WHERE card_id=?", (self.card_id,)), old_ids)
-        self.assertEqual(self.rows("SELECT * FROM review_log WHERE question_id=?", (gender_id,)), [])
+
 
     def test_committed_unknown_or_inferred_classification_does_not_reinfer_on_edit(self):
         # Old clients omitting the fields must also preserve committed values.
@@ -1272,17 +1034,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT * FROM questions WHERE card_id=? AND kind='gender'",
                                   (card_id,)), [])
 
-    def test_gender_edit_invalidates_active_question(self):
-        card_id = self.german_card()
-        self.gender_attempt(card_id)
-        path = f"/decks/{self.deck_name}/cards/{card_id}/edit"
-        response = self.post(path, self.edit_payload(
-            front_text=["morning"], front_description=[""],
-            back_text=["der Morgen"], back_description=[""], meta="",
-            word_type="noun", gender="feminine"))
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.answer("der").status_code, 409)
-        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+
 
     def test_classification_db_constraints_and_no_persisted_provenance(self):
         card_id = self.german_card()

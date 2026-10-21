@@ -3,13 +3,14 @@
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
+import time
 
 from flask import current_app, g
 
 from .search import matches_search
 from .german import classification
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def get_db():
@@ -30,7 +31,7 @@ def close_db(error=None):
 
 @contextmanager
 def transaction(db):
-    """Serialize writers, including read/compare/write review finalization."""
+    """Serialize writers, including revision checks and atomic lesson completion."""
     db.execute("BEGIN IMMEDIATE")
     try:
         yield db
@@ -42,7 +43,17 @@ def transaction(db):
 
 def initialize():
     db = get_db()
-    db.execute("PRAGMA journal_mode = WAL")
+    # Changing a brand-new database to WAL can report SQLITE_BUSY immediately
+    # during concurrent startup, even with busy_timeout configured.
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            db.execute("PRAGMA journal_mode = WAL")
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
     # Rebuilding questions must not cascade into progress/history. SQLite requires
     # this connection-local switch outside the transaction. All upgrades are serialized
     # and checked for FK violations before commit; other connections keep FK enforcement.
@@ -54,6 +65,9 @@ def initialize():
                 return
             if version == 2:
                 migrate_v2_to_v3(db)
+                version = 3
+            if version == 3:
+                execute_sql(db, Path(__file__).resolve().parent.parent / 'migrations/004_lessons.sql')
             elif version == 0:
                 tables = db.execute(
                     "SELECT name FROM sqlite_master WHERE type = 'table' "
@@ -62,14 +76,7 @@ def initialize():
                 if tables:
                     raise RuntimeError("Refusing to initialize a nonempty, unversioned database.")
                 # executescript() commits implicitly; keep DDL inside our writer lock.
-                statement = ""
-                for line in Path(__file__).with_name("schema.sql").read_text().splitlines(True):
-                    statement += line
-                    if sqlite3.complete_statement(statement):
-                        db.execute(statement)
-                        statement = ""
-                if statement.strip():
-                    raise RuntimeError("Incomplete schema statement")
+                execute_sql(db, Path(__file__).with_name("schema.sql"))
             else:
                 raise RuntimeError(
                     f"Unsupported database version {version}; expected {SCHEMA_VERSION}. "
@@ -79,6 +86,18 @@ def initialize():
                 raise RuntimeError("Database migration failed its foreign-key check.")
     finally:
         db.execute("PRAGMA foreign_keys = ON")
+
+
+def execute_sql(db, path):
+    """Unlike executescript, keep every statement in the caller\'s transaction."""
+    statement = ""
+    for line in path.read_text().splitlines(True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            db.execute(statement)
+            statement = ""
+    if statement.strip():
+        raise RuntimeError("Incomplete schema statement")
 
 
 def migrate_v2_to_v3(db):

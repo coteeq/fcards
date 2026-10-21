@@ -1,9 +1,9 @@
 # fcard
 
 A server-rendered Flask + SQLite flashcard app with username-only login, primarily for
-English ↔ German vocabulary. Small vanilla JavaScript handlers provide live search
-and Enter shortcuts, client-side row editing, and German classification hints. All controls also work without
-JavaScript using their buttons. The visual design and base stylesheet come from the
+English ↔ German vocabulary. Vanilla JavaScript provides finite, fast lessons with
+local answer checking, background sync, live search, row editing, and classification
+hints. Vocabulary management works without JavaScript; lessons require it. The visual design and base stylesheet come from the
 sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
 
 ## Run
@@ -25,20 +25,31 @@ Use `uv add <package>` to add dependencies and `uv lock --upgrade` to update the
 lockfile. Keep `pyproject.toml` and `uv.lock` together when sharing the app.
 
 The database is created automatically under `instance/`. The session-signing key is
-random and ephemeral by default: restarting the server logs everyone out and discards
-unfinished questions, but does not erase users, cards, or finalized progress. No key
+random and ephemeral by default: restarting logs everyone out, but saved lessons,
+users, cards, and committed scheduling progress survive. Sign in with the same username
+to resume unfinished lessons. No key
 file is written. Database initialization is transactional and safe for simultaneous
 worker startup. Unknown schema versions are rejected; there is no destructive reset
 command.
 
-The current schema is version 3. **Stop the old server and back up the database before
-upgrading.** On startup, version-2 databases are migrated transactionally in place:
-classification fields are added, existing canonical Back forms are classified with the
-rules below, and known nouns receive a new gender question. Stored form text, metadata,
-all existing question IDs, users, progress, and review history are preserved. New gender
-questions start unseen for every user. The migration checks foreign keys before commit;
-a failure rolls back the entire upgrade, including DDL and the schema version.
-Simultaneous startup is serialized, and reopening v3 does not reclassify saved values.
+The current schema is version 4. **Stop all old workers before upgrading.** Run the
+separate migration command with a new backup path (from `fcards/`):
+
+```sh
+uv run --locked python migrations/migrate.py instance/fcard.sqlite3 \
+  --backup /safe/path/fcard-before-v4.sqlite3
+```
+
+See [migrations/README.md](migrations/README.md). The v3 → v4 SQL is in
+`migrations/004_lessons.sql`. This one-time upgrade **drops the old per-answer
+`review_log` history**, as agreed. Added words/forms, metadata, classification, users,
+question IDs, and current scheduling progress are preserved. Lesson tables are added.
+Version-2 databases first receive the data-preserving classification upgrade to v3.
+
+Startup can also apply these upgrades automatically, so back up before starting the new
+version if you do not use the migration command. DDL/data/version changes are atomic;
+failures roll back the entire upgrade. Concurrent startups serialize. Reopening an
+already-upgraded database does not reclassify saved words or reapply lesson results.
 
 Never reset or replace a populated database as part of an upgrade. Future changes must
 ship explicit, transactional migrations. Unsupported versions are rejected, not erased.
@@ -122,23 +133,19 @@ The default database path is
    Gender questions instead offer radio choices, with no choice selected initially.
    They show the German Back word without its leading article, so the prompt does not
    give away the answer. All forms and both sides are revealed after checking.
-6. The Finalize review card is collapsed by default. Open it to correct the verdict
-   or adjust the scheduler; Next question stays outside and is focused after reveal,
-   so Enter advances. Advancing finalizes exactly one review. Empty answers are
-   incorrect, but can also be manually corrected.
-   Closing the tab or navigating away before advancing counts nothing and keeps the
-   pending question for resumption. “Discard question and return to deck” also counts
-   nothing, but explicitly clears that pending question.
-7. Review history shows the automatic verdict, final rating, and state transition.
-   Raw answers are not stored in that history.
+6. Choose **Create lesson · 20 questions** on a deck or the front page. The lesson
+   gets a stable UUID, with all questions/answers loaded once. Check, correction, and
+   Next question run locally without waiting for the server. The correction/adjustment
+   panel is collapsed by default; Next is outside and focused after reveal.
+7. The last verdict has **End lesson** instead of Next. Only ending commits all verdicts
+   to scheduling. Leave earlier and resume from **Uncompleted lessons** on the front
+   page. Completed lessons stay retrievable by UUID, without automatic deletion.
 
 Card/form text, metadata, and answers are limited to 500 characters; descriptions to
 160 characters; each side to 100 forms. Edits preserve question IDs and progress for
-all users. Removing metadata deletes only its question and that question's progress
-and review history. Likewise, clearing a noun's gender or changing to a non-noun removes
-only its gender question and that question's progress/history. Changing a known gender
-preserves its question ID and schedule. Concurrent/stale edits and study
-submissions are rejected. Row additions/removals take effect only when saving the card.
+all users. Removing metadata or noun gender deletes only its optional question and
+progress, not saved lesson snapshots. Changing a known gender preserves its question ID
+and schedule. Concurrent/stale card edits and conflicting lesson sync are rejected. Row additions/removals take effect only when saving the card.
 Whole-card and deck deletion are not exposed.
 
 The fixed header contains a Decks link and a username dropdown. Choose Light, Dark,
@@ -149,6 +156,43 @@ vertically with a prominent divider. Each form's description occupies the adjace
 cell of the same row, including on mobile; long text wraps within its own cell.
 The UI uses the same optional Google Font as `cgi`; if the font cannot be loaded, it
 falls back to monospace.
+
+## Lessons and asynchronous sync
+
+Lessons contain exactly 20 ordered question appearances. Selection uses the current
+scheduler, without replacement until the eligible pool is exhausted. Tiny decks repeat
+questions in additional cycles to reach 20, avoiding immediate repeats when possible.
+If no questions are eligible, no lesson is created.
+
+A lesson is available at `/lessons/<uuid>`, with owner-only JSON at
+`/api/lessons/<uuid>`. The JSON deliberately includes answers: this is a personal study
+tool, not an exam system. Checking uses the bundled full Unicode casefold map, not
+JavaScript's narrower `toLowerCase()`; whitespace, accents, and punctuation still matter.
+No network request is required to check or advance.
+
+Cursor and **final** rating/adjustment choices sync asynchronously. Raw answers,
+automatic verdicts, and whether a verdict was corrected are never sent or persisted.
+After a reload, the revealed answer/final choice can be restored, but not the original
+typed answer or automatic verdict. Corrections have no separate audit trail.
+
+Writes are serialized in the browser and revision-checked on the server. A small local
+storage outbox recovers unsynced choices after navigation; network failures retry with
+backoff, and visibility/online events attempt another sync. Lost acknowledgements retry
+the identical request before newer progress. Conflicting tabs stop rather than silently
+overwriting one another; explicitly reload saved state to discard local pending changes.
+If browser storage is unavailable, keep the tab open until progress is saved.
+
+**End lesson** waits for server acknowledgement; its scheduling changes and completion
+marker commit in one transaction. Completion is idempotent, including retries and
+concurrent requests. Failed completion applies nothing. Separate lessons apply to the
+latest scheduling state; repeated appearances each count as a review. During a pending
+end request the last screen is locked, and failed requests can safely retry.
+
+Lesson wording/answers are immutable snapshots. Later card edits do not change an
+existing lesson; changed/deleted source questions are skipped when applying schedules,
+with a completion summary indicating how many were skipped. Other question progress
+still applies atomically. No lesson is deleted automatically, and there is currently
+no lesson deletion button or endpoint.
 
 ## German word type and gender
 
@@ -182,8 +226,8 @@ draft if you switch away from Noun and back, but non-nouns persist with no gende
 Automatic/manual provenance is never stored in the database. When editing a saved card,
 both values are manual/locked, including unknown values; changing Back does not silently
 reclassify it. On creation, the server supplies missing hints even without JavaScript.
-Only known-gender nouns get a gender question, independently scheduled and finalized
-through the same reveal/correction flow as other questions.
+Only known-gender nouns get a gender question, independently scheduled through the same
+local reveal/correction flow as other questions; scheduling commits when the lesson ends.
 
 ## Existing-word hints while adding
 
@@ -289,9 +333,10 @@ The optional JavaScript checks use Node's built-in assertions (no npm packages):
 
 ```sh
 node tests/test_quick_add.cjs
-node tests/test_study_keyboard.cjs
 node tests/test_live_search.cjs
 node tests/test_card_editor.cjs
 node tests/test_card_entry.cjs
 node tests/test_word_classification.cjs
+node tests/test_lesson_sync.cjs
+node tests/test_lesson_ui.cjs
 ```

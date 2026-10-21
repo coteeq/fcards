@@ -12,7 +12,7 @@ from flask import (
 from werkzeug.exceptions import HTTPException
 
 from .db import get_db, transaction
-from . import models, reviews
+from . import models, lessons
 from .search import matches_search, search_keys
 from .german import INFER, WORD_TYPES, GENDERS, GENDER_LABELS
 
@@ -37,6 +37,9 @@ def csrf_token():
 @bp.before_app_request
 def load_user_and_check_csrf():
     g.user = None
+    # Legacy cookie-scoped study attempts are superseded by durable lessons.
+    session.pop("study", None)
+    session.pop("queue", None)
     if session.get("user_id") is not None:
         g.user = get_db().execute(
             "SELECT * FROM users WHERE id = ?", (session["user_id"],)
@@ -79,6 +82,8 @@ def response_headers(response):
 
 @bp.app_errorhandler(HTTPException)
 def http_error(error):
+    if request.path.startswith("/api/lessons/"):
+        return jsonify(error=error.description), error.code
     return render_template("error.html", error=error), error.code
 
 
@@ -146,7 +151,7 @@ def index():
            FROM decks d JOIN users u ON u.id = d.author_id ORDER BY d.created_at DESC, d.name""",
         (g.user["id"],),
     ).fetchall()
-    return render_template("index.html", decks=decks)
+    return render_template("index.html", decks=decks, lessons=lessons.unfinished(g.user["id"]))
 
 
 @bp.get("/search")
@@ -438,164 +443,70 @@ def card_editor(deck, card=None):
     ), (400 if error else 200)
 
 
-def scheduler_for(algorithm):
-    scheduler = current_app.config["SCHEDULERS"].get(algorithm)
-    if scheduler is None:
-        abort(503, "A recorded scheduler is unavailable. Restore it before reviewing.")
-    return scheduler
+@bp.post("/decks/<deck_name>/lessons")
+@login_required
+def create_lesson(deck_name):
+    require_deck(deck_name)
+    try:
+        lesson_id = lessons.create(deck_name, g.user["id"],
+                                   current_app.config["DEFAULT_ALGORITHM"],
+                                   current_app.config["SCHEDULERS"], int(time.time()))
+    except ValueError as exc:
+        flash(str(exc))
+        return redirect(url_for("web.deck_detail", deck_name=deck_name))
+    except LookupError as exc:
+        abort(503, str(exc))
+    return redirect(url_for("web.lesson", lesson_id=lesson_id))
 
 
-def current_pending(deck_name, require_answer=False):
-    pending = session.get("study")
-    if (not pending or pending["deck_name"] != deck_name
-            or pending["user_id"] != g.user["id"]):
-        abort(409, "This question is no longer active. Open Study again.")
-    token = request.form.get("attempt", "")
-    if not secrets.compare_digest(pending["token"].encode(), token.encode()):
-        abort(409, "This is an old study form. Reload Study before answering.")
-    if require_answer and "answer" not in pending:
-        abort(409, "Submit an answer before finalizing this review.")
-    return pending
+@bp.get("/lessons/<uuid:lesson_id>")
+@login_required
+def lesson(lesson_id):
+    try:
+        row = lessons.owned(str(lesson_id), g.user["id"])
+    except lessons.LessonMissing:
+        abort(404, "Lesson not found.")
+    return render_template("lesson.html", lesson=row)
+
+
+def lesson_result(lesson_id, finishing=None):
+    if g.user is None:
+        abort(401, "Sign in again, then reload this lesson. Local pending changes are kept.")
+    try:
+        if finishing is None:
+            data = lessons.load(str(lesson_id), g.user["id"])
+        else:
+            data = lessons.save(str(lesson_id), g.user["id"], request.get_json(silent=True),
+                                current_app.config["SCHEDULERS"], int(time.time()), finishing)
+    except lessons.LessonMissing as exc:
+        abort(404, str(exc))
+    except lessons.LessonConflict as exc:
+        abort(409, str(exc))
+    except ValueError as exc:
+        abort(400, str(exc))
+    except LookupError as exc:
+        abort(503, str(exc))
+    return jsonify(data)
+
+
+@bp.get("/api/lessons/<uuid:lesson_id>")
+def lesson_data(lesson_id):
+    return lesson_result(lesson_id)
+
+
+@bp.post("/api/lessons/<uuid:lesson_id>/state")
+def lesson_state(lesson_id):
+    return lesson_result(lesson_id, finishing=False)
+
+
+@bp.post("/api/lessons/<uuid:lesson_id>/finish")
+def lesson_finish(lesson_id):
+    return lesson_result(lesson_id, finishing=True)
 
 
 @bp.get("/decks/<deck_name>/study")
 @login_required
 def study(deck_name):
-    deck = require_deck(deck_name)
-    pending = session.get("study")
-    if pending and (pending["deck_name"] != deck_name or pending["user_id"] != g.user["id"]):
-        pending = None
-    if pending:
-        progress = get_db().execute(
-            "SELECT reviews FROM progress WHERE user_id = ? AND question_id = ?",
-            (g.user["id"], pending["question_id"]),
-        ).fetchone()
-        data = models.question_data(pending["question_id"], deck_name)
-        if (data is None or data["question"]["card_revision"] != pending["card_revision"]
-                or (progress["reviews"] if progress else 0) != pending["revision"]):
-            pending = None
-            session.pop("study", None)
-            flash("That question changed or was already reviewed; selected a fresh question.")
-    if not pending:
-        try:
-            selected = reviews.select_question(
-                deck_name, g.user["id"], current_app.config["DEFAULT_ALGORITHM"],
-                current_app.config["SCHEDULERS"], int(time.time()),
-                session.get("queue", {}),
-            )
-        except LookupError:
-            abort(503, "A recorded scheduler is unavailable. Restore it before reviewing.")
-        if selected is None:
-            session.pop("study", None)
-            return render_template("study.html", deck=deck, pending=None)
-        data = models.question_data(selected.question_id, deck_name)
-        if data is None:
-            abort(409, "This question no longer exists. Reload Study.")
-        pending = {
-            "deck_name": deck_name, "user_id": g.user["id"],
-            "question_id": selected.question_id, "revision": selected.reviews,
-            "card_revision": data["question"]["card_revision"],
-            "algorithm": selected.algorithm, "token": secrets.token_urlsafe(24),
-        }
-        session["study"] = pending
-    data = models.question_data(pending["question_id"], deck_name)
-    if data is None:
-        session.pop("study", None)
-        abort(409, "This question no longer exists.")
-    scheduler = scheduler_for(pending["algorithm"])
-    auto = reviews.verdict(pending["answer"], data["expected"]) if "answer" in pending else None
-    return render_template(
-        "study.html", deck=deck, pending=pending, data=data, scheduler=scheduler,
-        auto_verdict=auto,
-        default_rating=scheduler.default_rating(auto) if auto else None,
-    )
-
-
-def data_for_pending(pending, deck_name):
-    data = models.question_data(pending["question_id"], deck_name)
-    if data is None or data["question"]["card_revision"] != pending["card_revision"]:
-        session.pop("study", None)
-        abort(409, "This card was edited. Open Study again before answering.")
-    return data
-
-
-@bp.post("/decks/<deck_name>/study/answer")
-@login_required
-def answer(deck_name):
+    # Old bookmarks no longer launch an infinite, cookie-scoped study sequence.
     require_deck(deck_name)
-    pending = current_pending(deck_name)
-    if "answer" in pending:
-        abort(409, "This question has already been answered. Use the revealed verdict.")
-    submitted = request.form.get("answer", "")
-    # Keep bounded submitted text in the signed session; expected answers are never
-    # put in cookies, HTML, or hidden fields before reveal.
-    if len(submitted) > 500:
-        abort(400, "An answer must be at most 500 characters.")
-    data = data_for_pending(pending, deck_name)
-    if data["question"]["kind"] == "gender" and submitted not in ("", *GENDERS.values()):
-        abort(400, "Choose a gender from the offered answers.")
-    pending = dict(
-        pending, answer=submitted,
-        auto_verdict=reviews.verdict(submitted, data["expected"]),
-    )
-    session["study"] = pending
-    return redirect(url_for("web.study", deck_name=deck_name))
-
-
-@bp.post("/decks/<deck_name>/study/finish")
-@login_required
-def finish(deck_name):
-    require_deck(deck_name)
-    pending = current_pending(deck_name, require_answer=True)
-    scheduler = scheduler_for(pending["algorithm"])
-    data = data_for_pending(pending, deck_name)
-    auto = reviews.verdict(pending["answer"], data["expected"])
-    rating = request.form.get("rating", scheduler.default_rating(auto))
-    control = request.form.get("control") or None
-    try:
-        reviews.finalize(
-            g.user["id"], deck_name, pending, rating, control,
-            current_app.config["SCHEDULERS"], int(time.time()),
-        )
-    except ValueError as exc:
-        abort(400, str(exc))
-    except reviews.StaleReview as exc:
-        session.pop("study", None)
-        abort(409, str(exc))
-    session.pop("study", None)
-    session["queue"] = {
-        "deck_name": deck_name, "question_id": pending["question_id"],
-        "algorithm": pending["algorithm"],
-    }
-    return redirect(url_for("web.study", deck_name=deck_name))
-
-
-@bp.post("/decks/<deck_name>/study/pause")
-@login_required
-def pause(deck_name):
-    require_deck(deck_name)
-    current_pending(deck_name)
-    session.pop("study", None)
-    flash("Question discarded. The unfinished review was not counted.")
     return redirect(url_for("web.deck_detail", deck_name=deck_name))
-
-
-@bp.get("/decks/<deck_name>/history")
-@login_required
-def history(deck_name):
-    deck = require_deck(deck_name)
-    page = page_number()
-    logs = get_db().execute(
-        """SELECT l.*, q.kind, q.card_id,
-                  (SELECT text FROM card_forms f
-                   WHERE f.card_id = q.card_id AND f.side = 'front'
-                   ORDER BY position LIMIT 1) AS front
-           FROM review_log l JOIN questions q ON q.id = l.question_id
-           JOIN cards c ON c.id = q.card_id
-           WHERE l.user_id = ? AND c.deck_name = ?
-           ORDER BY l.id DESC LIMIT 31 OFFSET ?""",
-        (g.user["id"], deck_name, (page - 1) * 30),
-    ).fetchall()
-    return render_template(
-        "history.html", deck=deck, logs=logs[:30], more=len(logs) > 30, page=page,
-    )

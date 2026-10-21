@@ -43,7 +43,7 @@
     <h3 class="card-header">German classification</h3>
     <div class="card-body">
       {{ word_classification(word_type, gender, full=true, committed=card is not none) }}
-      {% if card %}<p class="muted">Removing a known noun gender or changing away from noun deletes its gender question and that question’s progress/history. Remaining question schedules are kept.</p>{% endif %}
+      {% if card %}<p class="muted">Removing a known noun gender or changing away from noun deletes its gender question and progress. Remaining schedules and saved lesson snapshots are kept.</p>{% endif %}
     </div>
   </section>
   <section class="card">
@@ -52,7 +52,7 @@
       <label for="meta">Free text <span class="muted">(optional)</span></label>
       <textarea id="meta" name="meta" rows="3" maxlength="500">{{ meta }}</textarea>
       <p class="muted">For example, “irregular plural”. Gender has its own field above. Nonblank metadata creates an extra question, prompted by the front.</p>
-      {% if card %}<p class="muted">Removing metadata deletes its question and all users’ progress and history for that question. Other question progress is kept.</p>{% endif %}
+      {% if card %}<p class="muted">Removing metadata deletes its question and all users’ progress for it. Other progress and saved lesson snapshots are kept.</p>{% endif %}
     </div>
   </section>
   {{ duplicate_hint("editor-duplicates") }}

@@ -57,19 +57,27 @@ CREATE TABLE progress (
 );
 CREATE INDEX progress_due ON progress(user_id, due_at);
 
-CREATE TABLE review_log (
-    id INTEGER PRIMARY KEY,
+CREATE TABLE lessons (
+    id TEXT PRIMARY KEY NOT NULL,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    reviewed_at INTEGER NOT NULL,
-    auto_verdict TEXT NOT NULL CHECK (auto_verdict IN ('correct', 'incorrect')),
-    rating TEXT NOT NULL,
-    control TEXT,
-    algorithm TEXT NOT NULL,
-    before_state_json TEXT NOT NULL CHECK (json_valid(before_state_json)),
-    after_state_json TEXT NOT NULL CHECK (json_valid(after_state_json)),
-    due_at INTEGER
+    deck_name TEXT NOT NULL REFERENCES decks(name) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    state_json TEXT NOT NULL DEFAULT '{"cursor":0,"ratings":[]}' CHECK (json_valid(state_json)),
+    skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped BETWEEN 0 AND 20)
 );
-CREATE INDEX review_log_user_time ON review_log(user_id, reviewed_at, id);
+CREATE INDEX lessons_unfinished ON lessons(user_id, completed_at, updated_at);
 
-PRAGMA user_version = 3;
+CREATE TABLE lesson_items (
+    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 19),
+    question_id INTEGER REFERENCES questions(id) ON DELETE SET NULL,
+    algorithm TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),
+    PRIMARY KEY (lesson_id, position)
+);
+CREATE INDEX lesson_items_question ON lesson_items(question_id);
+
+PRAGMA user_version = 4;

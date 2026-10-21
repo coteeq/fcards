@@ -6,187 +6,160 @@
   identity, not a security credential. No passwords.
 - **decks**: `name` (text primary key), `description`, `author_id` (FK to users),
   `created_at`. Names match `[A-Za-z_][A-Za-z0-9_]*` (ASCII, max 120 characters).
-  There is no numeric deck ID: foreign keys and URLs use the case-sensitive name.
-  The author is the user who created the deck, not an access restriction.
-  Every deck is visible to every user. No membership/enrollment table is needed:
-  opening a deck is sufficient. Author attribution is required and does not change
-  when another user adds cards.
-- **cards**: `id`, `deck_name` (FK to decks.name), `revision` (nonnegative integer),
-  `meta` (optional free text), nullable `word_type` and `gender`, `created_at`.
-  Revision starts at 0 and increments on every edit, independently of per-user progress
-  revisions. A card belongs to one deck; duplicate content is allowed. Side text lives
-  in ordered **front** and **back** forms, not duplicated card columns. German is on
-  Back; German-specific classification and gender questions use its first form.
-- **card_forms**: `id`, `card_id` (FK), `side` (`front` or `back`), `position`
-  (zero-based within the side), `text`, `description`. Unique
-  `(card_id, side, position)`. Each side must have at least one form, enforced by the
-  card creation/edit transaction. Symmetric forms avoid privileging either side; a side
-  with no variants simply has one form.
-- Creation/editing trims leading/trailing whitespace in form text, descriptions, and
-  metadata before validation and persistence. Interior whitespace and spelling stay
-  unchanged. Existing records are not rewritten until explicitly edited.
-- The first form on a side is the one with the smallest position, never the smallest
-  spelling or row ID. It is that side's canonical display/prompt/expected answer.
-  Other forms and their descriptions are shown after answering. Descriptions are short
-  free text, not a fixed grammar enum. Alternate forms are not automatically accepted
-  as canonical answers; the user can correct the verdict when appropriate.
-- Metadata remains arbitrary free text (e.g. `irregular plural`), separate from word
-  type and gender. Recovering it asks for the entire value, prompted by the front.
-- `word_type` is NULL (unknown) or `adjective`, `verb`, `noun`, `phrase`.
-  `gender` is NULL (unknown) or `masculine`, `feminine`, `neuter`; a non-NULL gender
-  requires type `noun`. These are card-wide attributes, not per-form descriptions.
-- Missing new-card classifications use the canonical Back text: remove a leading
-  case-insensitive `der/die/das` for counting; multiple remaining words mean phrase,
-  otherwise an article means noun, otherwise an `-en` ending means verb. Other words
-  stay unclassified. Nouns infer masculine/feminine/neuter from `der/die/das` unless an
-  explicit gender (including unknown) was supplied. These are hints, not full parsing;
-  plural and grammatical case can make articles ambiguous. Original form text is kept.
-- Inferred and manual choices persist identically. No provenance flag is stored. Saved
-  values, including unknowns, are not automatically reinterpreted on subsequent edits.
+  Names, foreign keys, and URLs are case-sensitive. Every deck is shared; authorship
+  is attribution, not an access restriction. There is no enrollment table.
+- **cards**: `id`, `deck_name` (FK), nonnegative `revision`, optional free-text `meta`,
+  nullable `word_type` and `gender`, `created_at`. Revision starts at 0 and increments
+  on every edit. A card belongs to one deck; duplicate content is allowed.
+- **card_forms**: `id`, `card_id` (FK), `side` (`front` or `back`), nonnegative
+  `position`, `text`, `description`. Unique `(card_id, side, position)`.
+  Each side has 1–100 ordered forms. The minimum position identifies the canonical
+  prompt/expected answer, not spelling or form ID. Other forms are revealed afterward,
+  not accepted automatically as canonical answers. Descriptions are arbitrary free text.
+- German is always on Back. Classification and gender questions use its first form.
+  `word_type` is NULL or `adjective`, `verb`, `noun`, `phrase`. `gender` is NULL or
+  `masculine`, `feminine`, `neuter`; a non-NULL gender requires type `noun`.
+- Missing new-card classifications use Back: remove a leading case-insensitive
+  `der/die/das` for counting; multiple remaining words mean phrase, otherwise an article
+  means noun, otherwise an `-en` ending means verb. Other words stay unclassified.
+  Nouns infer masculine/feminine/neuter from `der/die/das` unless explicitly overridden,
+  including with unknown gender. Plural/case ambiguity makes these hints, not parsing.
+- Inferred and manual choices persist identically, with no provenance flag. Saved
+  values,
+  including unknowns, are not reinterpreted automatically during edits.
+- Creation/editing trims outer whitespace from text, descriptions, and metadata before
+  validation/persistence. Interior whitespace and spelling stay unchanged. Existing form
+  text is not rewritten by migrations. Metadata remains arbitrary text, separate from
+  structured gender; a metadata question asks for its complete value.
 
 ## Questions are not cards
 
-- **questions**: `id`, `card_id` (FK), `kind` constrained to `front_to_back`,
-  `back_to_front`, `meta`, or `gender`; unique `(card_id, kind)`.
-- `front_to_back`: first front form → first back form.
-- `back_to_front`: first back form → first front form.
-- `meta`: first front form → metadata. Only created for nonblank metadata.
-- `gender`: first Back form with its leading `der/die/das` removed → the article for
-  the stored gender. Only exists for nouns with known gender. No other forms or article
-  are revealed in the prompt. Explicit stored gender takes precedence over source text.
-- Two mandatory questions and up to two optional questions are created atomically with
-  the card and its forms. Forms are not separate questions.
+- **questions**: `id`, `card_id` (FK), `kind`; unique `(card_id, kind)`.
+- `front_to_back`: first Front form → first Back form.
+- `back_to_front`: first Back form → first Front form.
+- `meta`: first Front form → nonblank metadata; absent for blank metadata.
+- `gender`: first Back form without leading `der/die/das` → the article for the stored
+  gender. Only exists for nouns with known gender. Explicit gender overrides source
+  text.
+- Two mandatory and up to two optional questions are created atomically with the card.
+  Forms are not separate questions. Each question has its own per-user schedule.
 
-## Answers and verdicts
+## Durable finite lessons
 
-- Translation/metadata questions accept typed answers. Gender answers select one of
-  `der`, `die`, `das`, with none selected initially. The server compares the submitted
-  answer to the canonical expected answer using Unicode `casefold()` on both strings.
-  No whitespace trimming, accent removal, punctuation normalization, or fuzzy matching:
-  apart from case, matching is exact. An empty answer is incorrect for every kind.
-- A match automatically produces `correct`; a mismatch produces `incorrect`. In both
-  cases the expected answer, both sides, forms, and metadata are revealed. The user
-  may change either verdict before moving to the next question.
-- The automatic verdict is the default; the user need not explicitly self-grade.
-  Advancing finalizes that verdict (or its correction) and updates progress once.
-  Corrections do not create additional reviews or apply the scheduler twice. Leaving
-  before finalization does not count a review. Post-finalization corrections are outside
-  the MVP; they would require replaying subsequent scheduler transitions.
-- Pending answer state is session-scoped: question ID, captured progress revision,
-  captured card revision, submitted answer, automatic verdict, and reveal status.
-  It is not review history.
-  The server recomputes the automatic verdict rather than trusting a submitted verdict.
-  Finalization permits only the original verdict or an explicit user correction.
+- **lessons**: UUID text primary key `id`, `user_id` (FK), `deck_name` (FK),
+  `created_at`, `updated_at`, nullable `completed_at`, nonnegative `revision`,
+  `state_json`, `skipped` (0–20). The UUID permanently identifies the saved lesson.
+  Only the matching user can retrieve or mutate it; deck vocabulary remains shared.
+- **lesson_items**: `lesson_id` (FK), `position` (0–19), nullable `question_id` (FK),
+  `algorithm`, `snapshot_json`; primary key `(lesson_id, position)`.
+- Creation selects exactly 20 appearances, without updating schedules. It applies the
+  recorded scheduler's eligibility/weighted selection, without replacement until the
+  eligible pool is exhausted. Small decks repeat in additional cycles to fill 20 slots;
+  avoid immediate repeats when an alternative exists. Mixed algorithms rotate groups.
+- Selection, order, algorithm, and snapshots persist in one transaction. A snapshot
+  contains original question/card IDs and card revision, kind, label, prompt, expected
+  answer and its Unicode-casefold key, both sides/forms/descriptions, metadata, rating
+  choices/defaults, and scheduler controls. Questions and answers load together once.
+- Snapshots are immutable, including after vocabulary edits. Deleting a source question
+  sets the item's live FK to NULL, not deleting the lesson. Snapshots retain original
+  identity/text independently. A newly created question does not replace an old slot.
+- `state_json` is exactly `{cursor, ratings}`. Cursor is 0–19. Ratings form a contiguous
+  answered prefix of length `cursor` (current question unanswered) or `cursor + 1`
+  (current verdict revealed). Each entry contains only final `rating` and nullable
+  scheduler `control`, validated against its item's snapshotted options.
+- Raw submitted answers, automatic verdicts, correction flags, and correction history
+  never persist. Answer checking uses Unicode casefold only, with no whitespace,
+  punctuation, accent, or transliteration normalization. Gender choices submit an
+  article.
+  Both automatic and manually corrected choices become indistinguishable final ratings.
+- Async sync changes only lesson state/revision/time, never scheduling progress. Writers
+  compare the lesson revision under an immediate transaction. An identical retried state
+  is idempotent; a stale revision with different state is rejected, not overwritten.
+  Browser recovery retains pending final choices, not raw answers or original verdicts.
+- Incomplete lessons are queryable by user, including all-answered lessons not yet
+  ended.
+  They survive logout, session expiration, and server restart. Completed lessons remain
+  retrievable at their UUID but are absent from the incomplete list.
 
-## Personal scheduling
+## Completion and personal scheduling
 
 - **progress**: composite PK `(user_id, question_id)`, `algorithm`, `state_json`,
-  nullable `due_at`, `last_reviewed_at`, `reviews`, `lapses`. Foreign keys to user and
-  question. A persisted row represents at least one finalized review.
-- No progress row means *new*, not missing/broken. This avoids eagerly generating the
-  user × question Cartesian product. Questions added after a user starts a deck are
-  immediately available.
-- A user's question kinds have independent schedules. There is no global
-  card-level scheduling state and no user-specific copy of shared vocabulary.
-- `algorithm` is a versioned scheduler identifier; `state_json` is algorithm-owned,
-  versioned state. Existing questions use their recorded algorithm; the configured
-  default applies only to new questions. Switching an existing question requires an
-  explicit migration, not interpreting old state as a different algorithm.
-- `last_reviewed_at` is the UTC Unix timestamp in seconds of the most recent finalized
-  review. It is audit information, not necessarily a scheduling input. `reviews` counts
-  finalized reviews; `lapses` counts finalized `incorrect` verdicts, including the first
-  review if incorrect.
-- `due_at` is a nullable UTC Unix timestamp in seconds: the earliest next review time
-  for a time-based scheduler. It is always NULL for `buckets-v1`, which does not use
-  time. NULL means no time gate, not a missing review or an overdue question.
-
-### Bucket scheduler and plugin boundary
-
-- Initial implementation: `buckets-v1`, with `state_json` containing integer `bucket`
-  in the range 0–10. New questions start at bucket 0. Success advances one bucket;
-  failure drops three, clamped to the range. No time intervals are implied. Optional
-  controls apply an extra +5 or −5 after the verdict, also clamped.
-- For a bucket-only queue, choose among all questions in the selected deck with
-  weight `2 ** (-bucket)`, treating unseen questions as bucket 0. Higher buckets are
-  less frequent, not postponed until a date. Exclude the immediately previous question
-  when another eligible question exists; a one-question pool can repeat immediately.
-- A scheduler owns queue eligibility/priority, state transitions, and optional extra
-  controls. Its transition accepts the final verdict and returns updated state and an
-  optional due timestamp. Persistence and HTTP handling stay outside the scheduler.
-- For future time-based plugins, exclude future-due questions and prioritize overdue
-  questions before unseen ones. For a mixed-algorithm deck, choose an eligible algorithm
-  group round-robin, then let that plugin select within its group. Buckets must not be
-  globally sorted by `due_at`; they have no due time.
-- A future FSRS plugin can store stability/difficulty in JSON and use `due_at` without
-  altering vocabulary tables. Additional algorithm-specific grading controls can be
-  added through the plugin interface; binary correctness alone is not an FSRS rating.
-
-### Review history and concurrency
-
-- **review_log**: `id`, `user_id`, `question_id`, `reviewed_at`, `auto_verdict`,
-  `rating`, nullable `control`, `algorithm`, `before_state_json`, `after_state_json`,
-  nullable `due_at`. `control` records an optional algorithm-specific adjustment.
-  Written in the same transaction as progress and immutable through the application.
-  Absence of prior state is JSON `null`; the initial bucket is still interpreted as 0.
-- `auto_verdict` stores `correct` or `incorrect` from the submitted-answer comparison.
-  `rating` stores the final scheduler input after any user correction. For
-  `buckets-v1`, it is exactly `correct` or `incorrect`, not a bucket number or delta.
-  Comparing these fields identifies corrected verdicts. Ratings are interpreted with
-  their algorithm ID; a future FSRS plugin could use `again`, `hard`, `good`, `easy`.
-- `reviewed_at` records finalization time in UTC Unix seconds. `due_at` records the
-  resulting next due time, NULL for buckets. State snapshots preserve history for
-  scheduler evaluation and migrations; raw submitted answers are not retained in logs.
-- Grade transactions serialize writers and compare the progress review count to the
-  revision captured when the question was selected (zero for unseen questions). A
-  stale/replayed submission cannot advance progress twice. The card revision is also
-  checked inside this transaction so edits cannot silently change an active question.
-  Session state binds selection to the current user and requires answer/reveal before
-  finalization.
+  nullable `due_at`, `last_reviewed_at`, `reviews`, `lapses`. Foreign keys to users and
+  questions. No row means unseen; rows represent at least one committed review.
+- Only explicit lesson completion commits verdicts. It requires all 20 final choices and
+  applies them in lesson order, marking completion in the same immediate transaction.
+  A failure rolls back every scheduling write and the completion marker.
+- Completed lessons are immutable. Concurrent/replayed completion or delayed sync cannot
+  apply ratings twice or reopen the lesson. An already-completed response is idempotent.
+- Apply each appearance to the latest progress, not creation-time scheduling state.
+  Separate lessons can finish in either order without discarding one another's reviews.
+  Repeated appearances of a question each count as a review, applied sequentially.
+- Each still-live question must match its snapshotted card ID/revision/kind and recorded
+  algorithm. Edited/deleted questions and changed algorithm assignments are skipped,
+  counted in `skipped`; they do not invalidate or change the lesson's snapshot/results.
+  Unavailable required scheduler code aborts completion for later retry, not
+  substitution.
+- `last_reviewed_at` is the UTC completion timestamp, not an answer timestamp. `reviews`
+  counts committed appearances; `lapses` counts final incorrect ratings. An explicitly
+  corrected rating is treated exactly like the same uncorrected rating.
+- `algorithm` is versioned; `state_json` belongs to that scheduler. A new default
+  applies
+  only to unseen questions. Existing progress keeps its algorithm/state. Algorithm
+  changes require explicit migration. Scheduling state has no shared card-level bucket.
+- `due_at` is the earliest next review time for time-based algorithms; future questions
+  are ineligible. NULL means no time gate. A recorded scheduler must remain registered.
+- `buckets-v1`: integer bucket 0–10, unseen bucket 0. Correct +1, incorrect −3, clamped.
+  Optional controls apply another +5/−5 after the verdict, also clamped. Selection
+  weight
+  is `2 ** (-bucket)`, not due-date order. All bucket questions stay available; dates
+  are not used, and `due_at` remains NULL.
+- The scheduler owns eligibility, choice, ratings/controls, and transitions to a new
+  state
+  and optional due date. Persistence, snapshots, transactions, and lessons stay outside
+  the plugin. Future FSRS state can live in JSON without altering vocabulary tables.
+- There is no per-answer audit/history table. Completed lesson snapshots and final
+  ratings retain lesson results, without the user's answer or whether it was corrected.
 
 ## Integrity and lifecycle
 
-SQLite foreign keys are enabled on every connection. Vocabulary and progress writes are
-transactional. Deck → cards → forms/questions → progress/log foreign keys cascade on
-deletion, as do user → progress/log. Deck author deletion is restricted so attribution
-cannot disappear; user/deck/whole-card deletion is not exposed. Unique/check constraints
-cover identities, sides, form order, question kinds, nonblank required text,
-and nonnegative counters. Indexes cover deck cards, question lookup, user due queues,
-and review history. At-least-one-form-per-side and optional meta/gender question rules
-span tables and are enforced at the application write boundary.
+SQLite foreign keys enforce relationships during normal operation. Deck deletion
+cascades
+through cards/forms/questions/progress and lessons/items. User deletion cascades through
+progress/lessons, but deck author deletion is restricted. Whole-card/deck/user deletion
+is not exposed in the UI. Question deletion sets lesson references to NULL; it does not
+remove saved lessons. At-least-one-form-per-side, optional-question, exact
+lesson-length,
+and state-prefix invariants span tables and are enforced by transactional write paths.
 
-Card editing preserves the card ID and all remaining question IDs/progress. Forms are
-replaced atomically in their submitted order; removing the first promotes the next.
-At least one form on each side remains mandatory. Blank metadata deletes its question
-and cascades to that question's progress/history for every user. Adding metadata creates
-its question if absent; changing nonblank metadata preserves that question's progress.
-Similarly, clearing gender or changing away from noun deletes only the gender question
-and its progress/history; assigning a known noun gender creates it if absent. Changing
-one known gender to another preserves the gender question ID, progress, and history.
-Edits compare the submitted card revision before incrementing it, rejecting stale saves.
-Form IDs are not progression identities and can change on save. Existing review logs
-retain scheduling state, not historical side text; history displays current card text.
+Edits compare card revisions, replace forms in submitted order, and preserve remaining
+question IDs/progress. Removing the first form promotes the next. Blank metadata or
+removed noun gender deletes only its optional question/progress; existing lesson
+snapshots survive. Changing known gender or nonblank metadata preserves its question's
+schedule. Card edits never rewrite snapshots; stale lesson items are skipped on ending.
 
-Quick creation uses the same card-creation transaction with one form per side, empty
-form descriptions, and no metadata. It yields two translation questions, plus a gender
-question for a known-gender noun. It needs no separate table or data model. Reusing a
-card in several decks would require a deck-card join table and an explicit decision
-whether progress is shared across decks; currently each deck's card is independent.
+Quick creation shares the card transaction: one form per side, empty descriptions and
+metadata, two mandatory questions, and a gender question for a known-gender noun.
+Search and advisory duplicate checks read existing forms globally with English/German
+normalization at query time, without stored search columns or uniqueness constraints.
+Search is substring-based; duplicate hints compare whole normalized forms and exclude
+the edited card. Neither changes grading, lessons, or progress.
 
-Search reads existing form text on either side across all decks. English/German ASCII
-normalization is computed at query time by a SQLite connection-local function: it needs
-no stored search columns, duplicate vocabulary, or schema change. Original spellings and
-answer comparison rules remain unchanged. Advisory duplicate checks compare whole-form
-normalized keys across either side of every deck and exclude the card being edited.
-They do not impose uniqueness, alter progress, or add tables/indexes.
+## Schema evolution
 
-Schema evolution uses SQLite `user_version` (current version 3). The v2 → v3 migration
-adds nullable classification columns, rebuilds the question-kind constraint preserving
-all question IDs, classifies canonical Back forms, and adds unseen gender questions for
-known-gender nouns. Existing forms, metadata, revisions, users, progress, and logs stay
-unchanged. Foreign-key enforcement is temporarily disabled only on the migration
-connection outside its transaction to avoid cascades during the rebuild. The upgrade
-holds an immediate writer lock, checks all foreign keys before committing, and restores
-FK enforcement even on failure. DDL, backfill, and version changes roll back together.
-Already-upgraded databases are not reclassified. Every future schema change must ship
-an explicit transactional migration preserving populated data. Upgrades must never
-reset or replace the database; unsupported versions are rejected rather than erased.
+SQLite `user_version` is currently 4. The supported v2 → v3 migration adds
+classification,
+backfills canonical Back forms, and adds known-gender noun questions, preserving old
+IDs,
+forms, metadata, revisions, users, and scheduling progress. The v3 → v4 migration in
+`migrations/004_lessons.sql` adds lesson tables and, with explicit one-time permission,
+drops `review_log`. Vocabulary and current per-user schedules remain unchanged by v4.
+
+`migrations/migrate.py` upgrades an existing database with an optional non-overwriting
+SQLite backup. Startup also applies supported upgrades. All DDL, data backfill, and
+version changes share one immediate transaction; failure rolls everything back. FK
+checking is temporarily disabled only on the migration connection outside its
+transaction
+to safely rebuild v3's question constraint, checked before commit, and always restored.
+Concurrent startups serialize; already-upgraded databases are not reclassified. Future
+schema changes must ship explicit transactional migrations preserving populated data;
+unsupported versions are rejected, never reset or replaced.

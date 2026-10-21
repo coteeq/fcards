@@ -156,15 +156,18 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
   doc.append(form, panel);
   let timerId = 0;
   const timers = new Map(), requests = [];
+  const saved = new Map();
   const context = vm.createContext({
     document: doc, AbortController,
+    window: { addEventListener() {} }, location: { reload() {} },
+    localStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value), removeItem: (key) => saved.delete(key) },
     Event: class { constructor(type) { this.type = type; } },
     setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
     clearTimeout(id) { timers.delete(id); },
     fetch(url, options) { return new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })); },
   });
   return {
-    doc, form, panel, status, list, meta, timers, requests, choices,
+    doc, form, panel, status, list, meta, timers, requests, choices, saved,
     get focused() { return focused; },
     rows: (side) => [...form.querySelector(`[data-form-rows="${side}"]`).children],
     load(script) { vm.runInContext(fs.readFileSync(path.join(__dirname, '../fcard/static', script), 'utf8'), context); },

@@ -196,6 +196,15 @@ details label { margin-top: 0.8rem; }
 summary { cursor: pointer; color: var(--text-muted); }
 .tab-toolbar { align-items: center; }
 .study-leave { margin-top: var(--gap); }
+.lesson-sync { min-height: 2.5em; margin-bottom: 0.75rem; }
+[data-lesson-stage] { border: 1px solid var(--border); border-radius: var(--radius); }
+[data-lesson-stage]:empty { display: none; }
+[data-lesson-stage] > button { margin: 1rem; }
+.lesson-list { list-style: none; }
+.lesson-list li + li { margin-top: 0.75rem; }
+.lesson-list small { display: block; }
+.lesson-results { padding: 1rem 1rem 1rem 2.5rem; }
+.lesson-results li + li { margin-top: 0.35rem; }
 summary.card-header { color: var(--text-muted); }
 @media (prefers-color-scheme: dark) {
   :root[data-theme=system] .error { color: #ff8866; background: #2a1a14; border-color: #5a2a1a; }

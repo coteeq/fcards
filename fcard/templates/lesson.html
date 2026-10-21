@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import csrf with context %}
+{% block title %}Lesson · {{ lesson.deck_name }} · fcard{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='casefold.js') }}" defer></script>
+<script src="{{ url_for('static', filename='lesson-sync.js') }}" defer></script>
+<script src="{{ url_for('static', filename='lesson.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<h2 class="page-title">{{ lesson.deck_name }} · Lesson</h2>
+<div data-lesson data-url="{{ url_for('web.lesson_data', lesson_id=lesson.id) }}" data-state-url="{{ url_for('web.lesson_state', lesson_id=lesson.id) }}" data-finish-url="{{ url_for('web.lesson_finish', lesson_id=lesson.id) }}" data-lesson-id="{{ lesson.id }}">
+  {{ csrf() }}
+  <p class="muted lesson-sync" data-sync-status role="status" aria-live="polite">Loading your saved lesson…</p>
+  <p class="error" data-lesson-error role="alert" hidden></p>
+  <button type="button" data-use-saved hidden>Reload saved state (discard local changes)</button>
+  <div data-lesson-stage></div>
+</div>
+<noscript><p class="notice">Lessons require JavaScript for instant checking and asynchronous progress sync.</p></noscript>
+<p class="muted study-leave">You can leave and resume this lesson from the front page. Scheduling changes only after End lesson succeeds.</p>
+<p><a href="{{ url_for('web.index') }}">Back to decks and saved lessons</a> · <a href="{{ url_for('web.deck_detail', deck_name=lesson.deck_name) }}">Browse this deck</a></p>
+{% endblock %}

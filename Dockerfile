@@ -25,6 +25,7 @@ RUN groupadd --system --gid 10001 fcard \
 
 COPY --from=builder /app/.venv /app/.venv
 COPY fcard/ ./fcard/
+COPY migrations/ ./migrations/
 
 USER fcard
 
