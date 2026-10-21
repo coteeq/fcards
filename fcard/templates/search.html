@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import card_view, word_search, pagination with context %}
 {% block title %}Search · fcard{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='search.js') }}" defer></script>{% endblock %}
 {% block content %}
 <h2 class="page-title">Search all decks</h2>
 {{ word_search(query, autofocus=true) }}

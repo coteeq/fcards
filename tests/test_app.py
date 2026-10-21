@@ -410,7 +410,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.session()["theme"], "light")
         self.post("/new-deck", {"name": "Escaping", "description": '<script>alert("x")</script>'})
         response = self.client.get("/")
-        self.assertNotIn(b"<script", response.data)
+        self.assertNotIn(b"<script>alert", response.data)
         self.assertIn(b"&lt;script&gt;", response.data)
         self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -870,7 +870,7 @@ class AppTest(unittest.TestCase):
             self.assertEqual(self.search_result_ids(query)[0], [])
         ids, response = self.search_result_ids('<script>alert("x")</script>')
         self.assertEqual(ids, [])
-        self.assertNotIn(b"<script", response.data)
+        self.assertNotIn(b"<script>alert", response.data)
         self.assertIn(b"&lt;script&gt;", response.data)
         self.assertEqual(self.search_result_ids("' OR 1=1 --")[0], [])
         self.assertEqual(self.client.get("/search", query_string={"q": "x" * 501}).status_code, 400)
@@ -916,6 +916,81 @@ class AppTest(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT word_matches(text, 'BROT') FROM card_forms WHERE text='Brot'"
             ).fetchone()[0], 1)
+
+    def test_live_search_uses_same_normalization_and_all_forms(self):
+        with self.app.app_context():
+            other = create_deck("Other", "", self.alice)
+            card_id = create_card(other, {
+                "front": [("die, Bückerei?", ""), ("Bückereien", "plural")],
+                "back": [("bakery", ""), ("bakeries", "plural")],
+            }, "")
+        for query in ("buck", "bueck", "BÜCK", "bakeries", "buckereien"):
+            response = self.client.get("/search/live", query_string={"q": query})
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertEqual([card["id"] for card in data["results"]], [card_id])
+            self.assertEqual(data["query"], query)
+            self.assertTrue(data["searchable"])
+            self.assertFalse(data["more"])
+            result = data["results"][0]
+            self.assertEqual(result["front"], "die, Bückerei?")
+            self.assertEqual(result["back"], "bakery")
+            self.assertEqual(result["deck"], "Other")
+            if query == "bakeries":
+                self.assertEqual(result["match"], {"text": "bakeries", "description": "plural"})
+            if query == "buck":
+                self.assertIsNone(result["match"])
+            self.assertIn(f"#card-{card_id}", result["url"])
+            self.assertEqual(self.client.get(result["url"]).status_code, 200)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_live_search_is_bounded_and_full_page_still_has_twenty(self):
+        with self.app.app_context():
+            for i in range(10):
+                create_card(self.deck_name, {
+                    "front": [(f"live word {i}", "")], "back": [("English", "")],
+                }, "")
+        response = self.client.get("/search/live?q=live")
+        data = response.get_json()
+        self.assertEqual(len(data["results"]), 8)
+        self.assertTrue(data["more"])
+        ids = [row["id"] for row in data["results"]]
+        self.assertEqual(len(set(ids)), 8)
+        self.assertEqual(ids, sorted(ids, reverse=True))
+        self.assertEqual(len(self.search_result_ids("live")[0]), 10)
+
+    def test_live_search_limits_auth_and_does_not_change_progress(self):
+        self.start()
+        self.answer("bread")
+        pending = self.pending()
+        for query in ("", "!!!", "中文"):
+            data = self.client.get("/search/live", query_string={"q": query}).get_json()
+            self.assertFalse(data["searchable"])
+            self.assertEqual(data["results"], [])
+        response = self.client.get("/search/live", query_string={"q": "x" * 501})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.get_json())
+        response = self.app.test_client().get("/search/live?q=brot")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("error", response.get_json())
+        self.assertEqual(self.client.get("/search/live?q=brot").status_code, 200)
+        self.assertEqual(self.pending(), pending)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+
+    def test_live_search_script_and_accessible_panel_are_on_search_pages(self):
+        for path in ("/", f"/decks/{self.deck_name}", "/search"):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn('src="/static/search.js" defer', html)
+            self.assertIn('data-live-url="/search/live"', html)
+            self.assertIn('aria-controls="live-search-results"', html)
+            self.assertIn('aria-label="Live search results" hidden', html)
+            self.assertIn('aria-live="polite"', html)
+            self.assertIn('method="get" action="/search"', html)
+        self.assertNotIn(b"static/search.js", self.client.get("/login", follow_redirects=False).data)
+        with self.client.get("/static/search.js") as response:
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("innerHTML", response.get_data(as_text=True))
 
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})

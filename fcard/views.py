@@ -6,14 +6,14 @@ import sqlite3
 import time
 
 from flask import (
-    Blueprint, abort, current_app, flash, g, redirect, render_template,
+    Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
     request, session, url_for,
 )
 from werkzeug.exceptions import HTTPException
 
 from .db import get_db, transaction
 from . import models, reviews
-from .search import search_keys
+from .search import matches_search, search_keys
 
 bp = Blueprint("web", __name__)
 
@@ -159,6 +159,40 @@ def search():
         "search.html", query=query, searchable=searchable, cards=cards,
         forms=forms, page=page, more=more,
     )
+
+
+@bp.get("/search/live")
+def live_search():
+    if g.user is None:
+        return jsonify(error="Session expired. Use Search to sign in."), 401
+    query = request.args.get("q", "")
+    if len(query) > 500:
+        return jsonify(error="Search text must be at most 500 characters."), 400
+    searchable = bool(search_keys(query)[0])
+    cards, more = (
+        models.search_cards(query, g.user["id"], 1, limit=8)
+        if searchable else ([], False)
+    )
+    forms = models.forms_for_cards([card["id"] for card in cards])
+    results = []
+    for card in cards:
+        sides = forms[card["id"]]
+        front, back = sides["front"][0]["text"], sides["back"][0]["text"]
+        match = None
+        if not matches_search(front, query) and not matches_search(back, query):
+            for side in ("front", "back"):
+                for form in sides[side][1:]:
+                    if matches_search(form["text"], query):
+                        match = {"text": form["text"], "description": form["description"]}
+                        break
+                if match:
+                    break
+        results.append({
+            "id": card["id"], "deck": card["deck_name"], "front": front, "back": back,
+            "match": match,
+            "url": url_for("web.search", q=query, _anchor=f"card-{card['id']}"),
+        })
+    return jsonify(query=query, searchable=searchable, results=results, more=more)
 
 
 @bp.route("/new-deck", methods=("GET", "POST"))

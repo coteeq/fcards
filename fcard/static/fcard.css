@@ -63,12 +63,39 @@ header .tab, .user-menu > summary {
 .user-menu-panel button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
 .user-menu-panel form + form { border-top: 1px solid var(--border); padding-top: 0.4rem; margin-top: 0.4rem; }
 .word-search {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   margin-bottom: var(--gap);
 }
 .word-search input[type=search] { margin: 0; }
+.live-search-panel {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: min(60vh, 28rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 0.3rem 0.8rem #0002;
+}
+.live-search-status, .live-search-all { display: block; padding: 0.65rem 0.8rem; }
+.live-search-list { list-style: none; padding: 0; margin: 0; }
+.live-search-list li { border-top: 1px solid var(--border); }
+.live-search-result { display: block; padding: 0.65rem 0.8rem; text-decoration: none; color: var(--text); }
+.live-search-result:hover, .live-search-result:focus { background: var(--label-bg); }
+.live-search-result:focus-visible, .live-search-all:focus-visible { outline-offset: -2px; }
+.live-search-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.live-search-sides > span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-search-sides > span + span { padding-left: 0.75rem; border-left: 1px solid var(--border); }
+.live-search-meta { display: block; margin-top: 0.3rem; overflow-wrap: anywhere; }
+.live-search-all { border-top: 1px solid var(--border); }
+.live-search-panel[hidden], .live-search-all[hidden] { display: none; }
 .quick-add { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
 .quick-add > div { flex: 1 1 10rem; min-width: 0; }
 .quick-add input:not([type=hidden]) { margin-bottom: 0; }
@@ -143,6 +170,8 @@ header .tab, .user-menu > summary {
 }
 .card-meta > strong { color: var(--text-muted); }
 @media (max-width: 600px) {
+  .live-search-sides { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
+  .live-search-sides > span + span { border-left: 0; border-top: 2px solid var(--accent); padding-left: 0; padding-top: 0.35rem; }
   .card-sides { grid-template-columns: minmax(0, 1fr); }
   .card-side--back { border-left: 0; border-top: 3px solid var(--accent); }
 }

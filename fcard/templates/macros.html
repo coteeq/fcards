@@ -40,10 +40,15 @@
 {% endmacro %}
 
 {% macro word_search(query='', autofocus=false) %}
-<form class="word-search" method="get" action="{{ url_for('web.search') }}" role="search">
+<form class="word-search" method="get" action="{{ url_for('web.search') }}" role="search" data-live-search data-live-url="{{ url_for('web.live_search') }}">
   <label class="sr-only" for="word-search">Search words in all decks</label>
-  <input id="word-search" type="search" name="q" value="{{ query }}" required maxlength="500" placeholder="Search words in all decks…" {% if autofocus %}autofocus{% endif %}>
+  <input id="word-search" type="search" name="q" value="{{ query }}" required maxlength="500" placeholder="Search words in all decks…" autocomplete="off" aria-controls="live-search-results" aria-expanded="false" {% if autofocus %}autofocus{% endif %}>
   <button>Search</button>
+  <div id="live-search-results" class="live-search-panel" aria-label="Live search results" hidden>
+    <p class="live-search-status muted" role="status" aria-live="polite"></p>
+    <ul class="live-search-list"></ul>
+    <a class="live-search-all" href="{{ url_for('web.search') }}">View all results →</a>
+  </div>
 </form>
 {% endmacro %}
 

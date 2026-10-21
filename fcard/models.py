@@ -124,7 +124,7 @@ def update_card(deck_name, card_id, forms, meta, revision):
             db.execute("DELETE FROM questions WHERE card_id = ? AND kind = 'meta'", (card_id,))
 
 
-def search_cards(query, user_id, page):
+def search_cards(query, user_id, page, limit=20):
     """Search every form independently, returning each matching card only once."""
     rows = get_db().execute(
         """SELECT c.*, COUNT(q.id) AS question_count,
@@ -135,10 +135,10 @@ def search_cards(query, user_id, page):
                SELECT 1 FROM card_forms f
                WHERE f.card_id = c.id AND word_matches(f.text, ?)
            )
-           GROUP BY c.id ORDER BY c.id DESC LIMIT 21 OFFSET ?""",
-        (user_id, query, (page - 1) * 20),
+           GROUP BY c.id ORDER BY c.id DESC LIMIT ? OFFSET ?""",
+        (user_id, query, limit + 1, (page - 1) * limit),
     ).fetchall()
-    return rows[:20], len(rows) > 20
+    return rows[:limit], len(rows) > limit
 
 
 def forms_for_cards(card_ids):

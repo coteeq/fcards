@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
 {% from 'macros.html' import csrf, card_view, word_search, pagination with context %}
-{% block scripts %}<script src="{{ url_for('static', filename='quick-add.js') }}" defer></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='quick-add.js') }}" defer></script>
+<script src="{{ url_for('static', filename='search.js') }}" defer></script>
+{% endblock %}
 {% block title %}{{ deck.name }} · fcard{% endblock %}
 {% block content %}
 {{ word_search() }}

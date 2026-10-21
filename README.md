@@ -1,9 +1,9 @@
 # fcard
 
 A server-rendered Flask + SQLite flashcard app with username-only login, primarily for
-English ↔ German vocabulary. Small vanilla
-JavaScript handlers make Enter advance/submit quick-add and check study answers.
-All controls also work without JavaScript using their buttons. The visual design and base stylesheet come from the
+English ↔ German vocabulary. Small vanilla JavaScript handlers provide live search
+and Enter shortcuts for quick-add and study answers. All controls also work without
+JavaScript using their buttons. The visual design and base stylesheet come from the
 sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
 
 ## Run
@@ -141,6 +141,14 @@ Use the search box on the deck list or a deck page. Search covers all decks and 
 form on both sides, including noncanonical forms. Results show full cards with their
 deck link and edit button, and each matching card appears only once.
 
+With JavaScript, typing shows live previews after a 250ms pause, up to eight cards.
+Previews include each card's first front/back forms, deck name, and a matching extra
+form when the match is not canonical. Click a preview to open its full card or choose
+View all results. Arrow keys navigate preview links; Escape or clicking outside closes
+previews. Text composition is supported. Clearing/changing the query cancels outdated
+requests and ignores stale responses. Loading, empty, and error states are shown.
+The Search button/Enter still opens the full results page, including without JavaScript.
+
 Search is a literal substring match after English/German ASCII normalization:
 
 - Case, punctuation, symbols, and spaces are ignored.
@@ -156,9 +164,11 @@ Search is a literal substring match after English/German ASCII normalization:
 
 Descriptions and metadata are not word forms and are not searched. Pagination keeps
 the query. Search reads existing form text directly (no schema migration or rebuilt
-index is needed), so edits and new cards are reflected immediately. No search-specific
-JavaScript is used. Stored spelling and answer grading are unchanged: search's looser
-matching is not used to decide whether a study answer is correct.
+index is needed), so edits and new cards are reflected immediately. Live previews use
+that same search logic and still scan forms across all decks; debouncing reduces the
+frequency of requests, not the amount of data each query can scan. Stored spelling and
+answer grading are unchanged: search's looser matching is not used to decide whether a
+study answer is correct.
 
 ## Scheduling
 
@@ -210,9 +220,10 @@ uv run --locked python -m unittest discover -s tests -v
 ```
 
 Tests use temporary databases and Flask's test client; no live server is needed.
-The optional keyboard-handler checks use Node's built-in assertions (no npm packages):
+The optional JavaScript checks use Node's built-in assertions (no npm packages):
 
 ```sh
 node tests/test_quick_add.cjs
 node tests/test_study_keyboard.cjs
+node tests/test_live_search.cjs
 ```
