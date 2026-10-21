@@ -96,6 +96,11 @@ header .tab, .user-menu > summary {
 .live-search-meta { display: block; margin-top: 0.3rem; overflow-wrap: anywhere; }
 .live-search-all { border-top: 1px solid var(--border); }
 .live-search-panel[hidden], .live-search-all[hidden] { display: none; }
+.duplicate-hint { margin: 0.8rem 0; padding: 0.75rem; border: 1px solid var(--border); background: var(--label-bg); }
+.duplicate-hint[hidden] { display: none; }
+.duplicate-hint ul { padding-left: 1.2rem; margin-top: 0.4rem; }
+.duplicate-hint li + li { margin-top: 0.35rem; }
+.duplicate-hint a { overflow-wrap: anywhere; }
 .quick-add { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
 .quick-add > div { flex: 1 1 10rem; min-width: 0; }
 .quick-add input:not([type=hidden]) { margin-bottom: 0; }

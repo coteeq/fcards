@@ -44,7 +44,7 @@ def load_user_and_check_csrf():
             session.clear()
     if request.method == "POST":
         expected = session.get("csrf", "")
-        supplied = request.form.get("csrf", "")
+        supplied = request.headers.get("X-CSRF-Token") or request.form.get("csrf", "")
         if not expected or not secrets.compare_digest(expected.encode(), supplied.encode()):
             abort(400, "This form expired. Reload the page and try again.")
 
@@ -193,6 +193,33 @@ def live_search():
             "url": url_for("web.search", q=query, _anchor=f"card-{card['id']}"),
         })
     return jsonify(query=query, searchable=searchable, results=results, more=more)
+
+
+@bp.post("/cards/suggestions")
+def card_suggestions():
+    if g.user is None:
+        return jsonify(error="Sign in to check existing words."), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Expected a JSON object."), 400
+    words = payload.get("words")
+    exclude = payload.get("exclude")
+    if (not isinstance(words, list) or len(words) > 200
+            or any(not isinstance(word, str) or len(word) > 500 for word in words)):
+        return jsonify(error="Supply up to 200 words of at most 500 characters."), 400
+    if exclude is not None and (type(exclude) is not int or not 1 <= exclude < 2**63):
+        return jsonify(error="Invalid card ID."), 400
+    cards, matches, more = models.suggest_cards(words, exclude)
+    forms = models.forms_for_cards([card["id"] for card in cards])
+    return jsonify(more=more, results=[{
+        "id": card["id"], "deck": card["deck_name"],
+        "front": forms[card["id"]]["front"][0]["text"],
+        "back": forms[card["id"]]["back"][0]["text"], "match": matches[card["id"]],
+        "url": url_for(
+            "web.deck_detail", deck_name=card["deck_name"], page=card["page"],
+            _anchor=f"card-{card['id']}",
+        ),
+    } for card in cards])
 
 
 @bp.route("/new-deck", methods=("GET", "POST"))

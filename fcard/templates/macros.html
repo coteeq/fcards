@@ -52,6 +52,13 @@
 </form>
 {% endmacro %}
 
+{% macro duplicate_hint(id) %}
+<aside id="{{ id }}" class="duplicate-hint" aria-label="Possible existing words" hidden>
+  <p class="muted" data-duplicate-status role="status" aria-live="polite"></p>
+  <ul data-duplicate-list></ul>
+</aside>
+{% endmacro %}
+
 {% macro pagination(endpoint, deck_name, page, more, query=none) %}
 {% if page > 1 or more %}
 <nav class="tab-toolbar" aria-label="Pagination">

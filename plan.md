@@ -22,6 +22,9 @@
   `(card_id, side, position)`. Each side must have at least one form, enforced by the
   card creation/edit transaction. Symmetric forms avoid privileging either side; a side
   with no variants simply has one form.
+- Creation/editing trims leading/trailing whitespace in form text, descriptions, and
+  metadata before validation and persistence. Interior whitespace and spelling stay
+  unchanged. Existing records are not rewritten until explicitly edited.
 - The first form on a side is the one with the smallest position, never the smallest
   spelling or row ID. It is that side's canonical display/prompt/expected answer.
   Other forms and their descriptions are shown after answering. Descriptions are short
@@ -155,7 +158,9 @@ deck's card is independent.
 Search reads existing form text on either side across all decks. English/German ASCII
 normalization is computed at query time by a SQLite connection-local function: it needs
 no stored search columns, duplicate vocabulary, or schema change. Original spellings and
-answer comparison rules remain unchanged.
+answer comparison rules remain unchanged. Advisory duplicate checks compare whole-form
+normalized keys across either side of every deck and exclude the card being edited.
+They do not impose uniqueness, alter progress, or add tables/indexes.
 
 Schema evolution uses SQLite `user_version` (current version 2). Populated databases
 must be preserved. Every future schema change must include an explicit transactional

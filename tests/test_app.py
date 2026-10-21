@@ -992,6 +992,131 @@ class AppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertNotIn("innerHTML", response.get_data(as_text=True))
 
+    def suggestion_request(self, words, exclude=None, client=None):
+        client = client or self.client
+        # Fetch a rendered page to obtain a CSRF token after login rotated the session.
+        client.get("/")
+        token = self.session(client)["csrf"]
+        return client.post("/cards/suggestions", json={"words": words, "exclude": exclude},
+                           headers={"X-CSRF-Token": token})
+
+    def test_add_and_edit_trim_entry_fields_without_changing_inner_spaces(self):
+        quick = self.post(f"/decks/{self.deck_name}/cards/quick", {
+            "front": "  die  Tür \t", "back": "\n the  door  ",
+        })
+        self.assertEqual(quick.status_code, 302)
+        self.assertEqual(self.rows(
+            "SELECT text FROM card_forms WHERE card_id=2 ORDER BY side"
+        ), [{"text": "the  door"}, {"text": "die  Tür"}])
+        response = self.post(f"/decks/{self.deck_name}/cards/new", self.edit_payload(
+            front_text=["  gehen  ", "\tging\n"], front_description=[" ", " past "],
+            back_text=[" go "], back_description=[" verb "], meta=" irregular ",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows("SELECT meta FROM cards WHERE id=3")[0]["meta"], "irregular")
+        self.assertEqual(self.rows(
+            "SELECT text, description FROM card_forms WHERE card_id=3 AND side='front' "
+            "ORDER BY position"
+        ), [{"text": "gehen", "description": ""}, {"text": "ging", "description": "past"}])
+        response = self.post(self.edit_url, self.edit_payload(
+            front_text=["  Laib  "], front_description=["  singular  "],
+            back_text=["  loaf  "], back_description=["  noun  "], meta="  neutral  ",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows(
+            "SELECT text, description FROM card_forms WHERE card_id=? AND side='front'",
+            (self.card_id,),
+        ), [{"text": "Laib", "description": "singular"}])
+
+    def test_model_trims_before_validating_lengths_and_keeps_grading_strict(self):
+        with self.app.app_context():
+            card_id = create_card(self.deck_name, {
+                "front": [("  " + "x" * 500 + "  ", " " + "d" * 160 + " ")],
+                "back": [("\u00a0word\u00a0", "")],
+            }, " " + "m" * 500 + " ")
+        self.assertEqual(len(self.rows(
+            "SELECT text FROM card_forms WHERE card_id=? AND side='front'", (card_id,),
+        )[0]["text"]), 500)
+        self.assertEqual(self.rows(
+            "SELECT text FROM card_forms WHERE card_id=? AND side='back'", (card_id,),
+        )[0]["text"], "word")
+        self.assertEqual(verdict(" bread ", "bread"), "incorrect")
+
+    def test_suggestions_match_whole_forms_on_either_side_in_all_decks(self):
+        with self.app.app_context():
+            other = create_deck("Other", "", self.alice)
+            card_id = create_card(other, {
+                "front": [("Bückerei", ""), ("Bückereien", "plural")],
+                "back": [("bakery", ""), ("bakeries", "plural")],
+            }, "")
+        for word in ("BÜCKEREI", "bueckerei", "buckerei", "bakeries"):
+            response = self.suggestion_request([word])
+            self.assertEqual(response.status_code, 200)
+            results = response.get_json()["results"]
+            self.assertEqual([r["id"] for r in results], [card_id])
+            self.assertEqual(results[0]["deck"], "Other")
+            self.assertEqual(self.client.get(results[0]["url"]).status_code, 200)
+        self.assertEqual(self.suggestion_request(["buck"]).get_json()["results"], [])
+        self.assertEqual(self.suggestion_request(["brote", "bread"]).get_json()["results"][0]["id"],
+                         self.card_id)
+        self.assertEqual(len(self.suggestion_request(["brot", "bread"]).get_json()["results"]), 1)
+
+    def test_suggestions_are_advisory_and_exclude_current_card(self):
+        self.assertEqual(self.suggestion_request(["brot"], self.card_id).get_json()["results"], [])
+        response = self.post(f"/decks/{self.deck_name}/cards/quick", {
+            "front": "Brot", "back": "bread",
+        })
+        self.assertEqual(response.status_code, 302)
+        ids = [r["id"] for r in self.suggestion_request(["brot"]).get_json()["results"]]
+        self.assertEqual(ids, [2, self.card_id])
+        self.assertEqual(len(self.rows("SELECT * FROM cards")), 2)
+        self.assertEqual(len(self.rows("SELECT * FROM questions")), 5)
+
+    def test_suggestions_are_bounded_with_links_to_actual_card_pages(self):
+        with self.app.app_context():
+            # Many newer nonmatching cards push the original card onto another page.
+            for i in range(21):
+                create_card(self.deck_name, {"front": [(str(i), "")], "back": [("new", "")]}, "")
+        response = self.suggestion_request(["brot"])
+        url = response.get_json()["results"][0]["url"]
+        self.assertIn("page=2", url)
+        self.assertIn(f'id="card-{self.card_id}"', self.client.get(url).get_data(as_text=True))
+        with self.app.app_context():
+            for i in range(6):
+                create_card(self.deck_name, {"front": [("same", "")], "back": [(str(i), "")]}, "")
+        data = self.suggestion_request(["same"]).get_json()
+        self.assertEqual(len(data["results"]), 5)
+        self.assertTrue(data["more"])
+
+    def test_suggestions_validate_csrf_payload_and_do_not_change_reviews(self):
+        self.start()
+        self.answer("bread")
+        pending = self.pending()
+        self.assertEqual(self.client.post("/cards/suggestions", json={"words": ["brot"]}).status_code, 400)
+        for words in (None, "brot", [1], ["x" * 501], ["x"] * 201):
+            self.assertEqual(self.suggestion_request(words).status_code, 400)
+        self.assertEqual(self.suggestion_request(["brot"], True).status_code, 400)
+        for words in ([], ["!!!"], ["中文"]):
+            self.assertEqual(self.suggestion_request(words).get_json()["results"], [])
+        response = self.suggestion_request(["brot"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.pending(), pending)
+        self.assertEqual(self.rows("SELECT * FROM progress"), [])
+        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+
+    def test_entry_enhancement_scripts_and_hints_are_on_both_forms(self):
+        for path in (f"/decks/{self.deck_name}", f"/decks/{self.deck_name}/cards/new", self.edit_url):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn('static/card-entry.js', html)
+            self.assertIn('data-card-entry', html)
+            self.assertIn('data-suggestions-url="/cards/suggestions"', html)
+            self.assertIn('aria-label="Possible existing words" hidden', html)
+        html = self.client.get(self.edit_url).get_data(as_text=True)
+        self.assertIn('static/card-editor.js', html)
+        self.assertIn('data-form-rows="front"', html)
+        self.assertIn(f'data-card-id="{self.card_id}"', html)
+        self.assertIn('value="add_front" formnovalidate', html)
+
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})
         with new_app.app_context():

@@ -96,13 +96,17 @@ The default database path is
    Front to Back and submits from Back; mobile keyboards show Next/Done hints. Without
    JavaScript, use Tab and the Add button. For more detail, choose Add card or Edit card.
    Each form is one compact row: text, optional description, and a square trash button.
-   Use “Add another … form” or the trash button to change rows without JavaScript.
+   Add/remove buttons update rows immediately in the browser, keeping entered values
+   and promoting the next form when the first is deleted. The verb preset is client-side
+   too. Without JavaScript, these buttons still work through a server-rendered fallback.
    The first remaining form on each side is canonical; each side must keep one form.
    Blank extra rows are ignored. Each form can have a short description. The Verb
    shortcut on either side prefills an undescribed infinitive row followed by `1sg`,
    `1pl`, `2sg`, `2pl`, `3sg`, `3pl`. It keeps entered text and any rows beyond those
    seven; applying it again does not duplicate rows. Fill in or remove the conjugation
-   rows before saving.
+   rows before saving. Saving trims leading/trailing whitespace from form text,
+   descriptions, and metadata; interior spaces, punctuation, and spelling are kept.
+   Trimming also runs server-side, including for quick-add and edits without JavaScript.
 4. Optional metadata creates a third question. Every card always has front → back and
    back → front questions, each scheduled independently.
 5. Type an answer and check it. Unicode case folding is the only normalization:
@@ -134,6 +138,21 @@ vertically with a prominent divider. Each form's description occupies the adjace
 cell of the same row, including on mobile; long text wraps within its own cell.
 The UI uses the same optional Google Font as `cgi`; if the font cannot be loaded, it
 falls back to monospace.
+
+## Existing-word hints while adding
+
+Quick-add and the extended add/edit form show advisory hints **while typing**, before
+submission. JavaScript batches the entered form texts after a 300ms pause and looks up
+existing words across all decks and all forms on both sides. Matches use whole-form
+English/German normalized equality (not arbitrary substring matches). The current card
+is excluded during editing. Descriptions and metadata do not trigger lookups.
+
+Hints show up to five existing cards with links opening in a new tab so drafts are not
+lost. Matches, lookup failures, and outstanding requests never require confirmation or
+disable Save: duplicate cards remain allowed. Adding/removing form rows refreshes the
+hints; stale responses are ignored. The lookup uses a CSRF-protected read-only request
+and does not create cards or change progress. Like search, this currently scans forms;
+there is no schema change, migration, or rewrite of existing data.
 
 ## Word search
 
@@ -226,4 +245,6 @@ The optional JavaScript checks use Node's built-in assertions (no npm packages):
 node tests/test_quick_add.cjs
 node tests/test_study_keyboard.cjs
 node tests/test_live_search.cjs
+node tests/test_card_editor.cjs
+node tests/test_card_entry.cjs
 ```

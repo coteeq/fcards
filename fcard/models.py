@@ -4,6 +4,7 @@ import re
 import time
 
 from .db import get_db, transaction
+from .search import search_keys
 
 DECK_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,119}")
 QUESTION_LABELS = {
@@ -62,15 +63,21 @@ def create_deck(name, description, author_id):
 
 
 def validate_card(forms, meta):
+    """Trim entry fields before validation; never change interior spelling/spaces."""
+    trimmed = {}
     for side in ("front", "back"):
         if not 1 <= len(forms.get(side, [])) <= 100:
             raise ValueError("Both sides need 1–100 forms")
+        trimmed[side] = []
         for text, description in forms[side]:
-            if not text.strip() or len(text) > 500 or len(description) > 160:
+            text, description = text.strip(), description.strip()
+            if not text or len(text) > 500 or len(description) > 160:
                 raise ValueError("Use form text of 1–500 characters and descriptions up to 160.")
+            trimmed[side].append((text, description))
+    meta = meta.strip()
     if len(meta) > 500:
         raise ValueError("Metadata is too long")
-    return meta if meta.strip() else ""
+    return trimmed, meta
 
 
 def insert_forms(db, card_id, forms):
@@ -86,7 +93,7 @@ def insert_forms(db, card_id, forms):
 
 
 def create_card(deck_name, forms, meta):
-    meta = validate_card(forms, meta)
+    forms, meta = validate_card(forms, meta)
     with transaction(get_db()) as db:
         card_id = db.execute(
             "INSERT INTO cards (deck_name, meta, created_at) VALUES (?, ?, ?)",
@@ -103,7 +110,7 @@ def create_card(deck_name, forms, meta):
 
 def update_card(deck_name, card_id, forms, meta, revision):
     """Preserve question IDs and schedules; only a removed meta question is deleted."""
-    meta = validate_card(forms, meta)
+    forms, meta = validate_card(forms, meta)
     with transaction(get_db()) as db:
         updated = db.execute(
             """UPDATE cards SET meta = ?, revision = revision + 1
@@ -139,6 +146,42 @@ def search_cards(query, user_id, page, limit=20):
         (user_id, query, limit + 1, (page - 1) * limit),
     ).fetchall()
     return rows[:limit], len(rows) > limit
+
+
+def suggest_cards(words, exclude=None, limit=5):
+    """Advisory whole-form matches, normalized like search, across all decks."""
+    keys = {key for word in words for key in search_keys(word) if key}
+    if not keys:
+        return [], {}, False
+    matches = {}
+    rows = get_db().execute(
+        "SELECT card_id, text FROM card_forms WHERE card_id != ? "
+        "ORDER BY card_id DESC, side, position", (exclude or 0,),
+    )
+    try:
+        for row in rows:
+            card_id = row["card_id"]
+            if card_id in matches:
+                continue
+            if keys.intersection(search_keys(row["text"])):
+                matches[card_id] = row["text"]
+                if len(matches) > limit:
+                    break
+    finally:
+        rows.close()
+    ids = list(matches)[:limit]
+    if not ids:
+        return [], {}, False
+    placeholders = ",".join("?" for _ in ids)
+    cards = get_db().execute(
+        f"""SELECT c.*, 1 + (
+                SELECT COUNT(*) FROM cards newer
+                WHERE newer.deck_name = c.deck_name AND newer.id > c.id
+            ) / 20 AS page
+            FROM cards c WHERE c.id IN ({placeholders}) ORDER BY c.id DESC""",
+        ids,
+    ).fetchall()
+    return cards, matches, len(matches) > limit
 
 
 def forms_for_cards(card_ids):
