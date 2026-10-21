@@ -1,6 +1,57 @@
 # Database migrations
 
-Stop all old fcard workers first. From the `fcards/` directory, run:
+Stop all old fcard workers first. Choose either Docker (no host Python/uv needed)
+or the local runner below.
+
+## Docker runner
+
+Build from the **`fcards/` directory**, not from `migrations/`:
+
+```sh
+docker build -f migrations/Dockerfile -t fcard-migrate .
+```
+
+For the named volume used in the application README:
+
+```sh
+docker stop fcard
+docker run --rm -v fcard-data:/app/instance fcard-migrate
+```
+
+Use your application's actual existing volume name. The runner defaults to
+`/app/instance/fcard.sqlite3` and creates a backup at
+`/app/instance/fcard-before-migration.sqlite3` on that same persistent volume. It exits
+when done; it does not start Flask/Gunicorn or expose any ports. uv is used only in the
+image's build stage, not on the host or in the runtime image.
+
+For a bind mount and explicit filenames:
+
+```sh
+docker run --rm \
+  --mount type=bind,src=/absolute/path/to/instance,dst=/app/instance \
+  fcard-migrate /app/instance/fcard.sqlite3 \
+  --backup /app/instance/fcard-before-v4.sqlite3
+```
+
+Arguments after `fcard-migrate` replace its defaults. Backup filenames must be new:
+if one already exists, choose another filename; nothing is overwritten. Mount the
+whole database directory, not just the SQLite file, so WAL/SHM files are available.
+For a custom database filename, pass its container path explicitly. To see options:
+
+```sh
+docker run --rm fcard-migrate --help
+```
+
+The image runs as UID/GID **10001**, like the app. Ensure the mounted directory,
+database, and any existing WAL/SHM files are writable by that user. For a bind mount
+owned by another user, either adjust permissions or use `--user UID:GID` matching its
+owner. Restart/recreate the app with its new image only after migration succeeds.
+If you build elsewhere, transfer the image to production via your registry or
+`docker save` / `docker load`; production only needs Docker.
+
+## Local runner
+
+From the `fcards/` directory, run:
 
 ```sh
 uv run --locked python migrations/migrate.py instance/fcard.sqlite3 \
@@ -30,8 +81,6 @@ Do not execute the SQL through Python's `executescript()` inside a transaction: 
 API commits implicitly. The runner and application execute complete statements without
 breaking their transaction. Unsupported versions are rejected rather than reset.
 
-In the Docker image, Python and this directory are available under `/app`; use
-`python migrations/migrate.py /app/instance/fcard.sqlite3 --backup ...` from a one-off
-container with the same data volume, after stopping the old app container. The runtime
-image does not contain uv. Ensure the database and backup directory are writable by
-UID/GID 10001.
+The regular app image also contains Python and this runner. If reusing it instead of
+building the dedicated image, override its Gunicorn entrypoint with
+`--entrypoint python` and pass `migrations/migrate.py` followed by database/backup paths.

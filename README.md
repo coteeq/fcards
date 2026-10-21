@@ -40,7 +40,20 @@ uv run --locked python migrations/migrate.py instance/fcard.sqlite3 \
   --backup /safe/path/fcard-before-v4.sqlite3
 ```
 
-See [migrations/README.md](migrations/README.md). The v3 → v4 SQL is in
+For production without host Python/uv, use the standalone Docker migration runner:
+
+```sh
+# From fcards/; stop the old app container before running the migration.
+docker build -f migrations/Dockerfile -t fcard-migrate .
+docker stop fcard
+docker run --rm -v fcard-data:/app/instance fcard-migrate
+```
+
+Use the same existing data volume as your app. By default this creates
+`fcard-before-migration.sqlite3` beside the database and refuses to overwrite it.
+See [migrations/README.md](migrations/README.md) for bind mounts, custom paths, and
+permissions. Restart/recreate the updated app only after migration succeeds.
+The v3 → v4 SQL is in
 `migrations/004_lessons.sql`. This one-time upgrade **drops the old per-answer
 `review_log` history**, as agreed. Added words/forms, metadata, classification, users,
 question IDs, and current scheduling progress are preserved. Lesson tables are added.
