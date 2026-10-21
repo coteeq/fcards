@@ -25,12 +25,34 @@
 {% endif %}
 {% endmacro %}
 
-{% macro pagination(endpoint, deck_name, page, more) %}
+{% macro card_view(card, forms, show_deck=false) %}
+<section class="card" id="card-{{ card.id }}">
+  <h3 class="card-header card-header--editable">
+    {% if show_deck %}<a href="{{ url_for('web.deck_detail', deck_name=card.deck_name) }}">{{ card.deck_name }}</a> · {% endif %}Card #{{ card.id }} · {{ card.seen_count }}/{{ card.question_count }} questions seen
+    <a class="button card-edit" href="{{ url_for('web.edit_card', deck_name=card.deck_name, card_id=card.id) }}" aria-label="Edit card #{{ card.id }}" title="Edit card">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="m16 3 5 5M3 21l5-1L21 7a2.1 2.1 0 0 0-5-5L3 15z"/>
+      </svg>
+    </a>
+  </h3>
+  {{ sides(forms, card.meta) }}
+</section>
+{% endmacro %}
+
+{% macro word_search(query='', autofocus=false) %}
+<form class="word-search" method="get" action="{{ url_for('web.search') }}" role="search">
+  <label class="sr-only" for="word-search">Search words in all decks</label>
+  <input id="word-search" type="search" name="q" value="{{ query }}" required maxlength="500" placeholder="Search words in all decks…" {% if autofocus %}autofocus{% endif %}>
+  <button>Search</button>
+</form>
+{% endmacro %}
+
+{% macro pagination(endpoint, deck_name, page, more, query=none) %}
 {% if page > 1 or more %}
 <nav class="tab-toolbar" aria-label="Pagination">
-  {% if page > 1 %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page-1) }}">← Previous</a>{% endif %}
+  {% if page > 1 %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page-1, q=query) }}">← Previous</a>{% endif %}
   <span class="muted">Page {{ page }}</span>
-  {% if more %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page+1) }}">Next →</a>{% endif %}
+  {% if more %}<a class="button" href="{{ url_for(endpoint, deck_name=deck_name, page=page+1, q=query) }}">Next →</a>{% endif %}
 </nav>
 {% endif %}
 {% endmacro %}

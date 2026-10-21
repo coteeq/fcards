@@ -152,7 +152,13 @@ table or data model. Reusing a card in several decks would require a deck-card j
 table and an explicit decision whether progress is shared across decks; currently each
 deck's card is independent.
 
-Schema evolution uses SQLite `user_version` (current version 2). A fresh database is
-required for this revision; no compatibility shims or migration from version 1 are
-provided. Other versions are rejected rather than silently mutated. Future schema
-changes need an explicit migration or an explicitly chosen fresh start.
+Search reads existing form text on either side across all decks. English/German ASCII
+normalization is computed at query time by a SQLite connection-local function: it needs
+no stored search columns, duplicate vocabulary, or schema change. Original spellings and
+answer comparison rules remain unchanged.
+
+Schema evolution uses SQLite `user_version` (current version 2). Populated databases
+must be preserved. Every future schema change must include an explicit transactional
+migration that preserves vocabulary, users, personal progress, and review history.
+Upgrades must never reset or replace the database. Versions without a supported
+migration are rejected rather than silently mutated or erased.

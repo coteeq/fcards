@@ -1,6 +1,7 @@
 # fcard
 
-A server-rendered Flask + SQLite flashcard app with username-only login. Small vanilla
+A server-rendered Flask + SQLite flashcard app with username-only login, primarily for
+English ↔ German vocabulary. Small vanilla
 JavaScript handlers make Enter advance/submit quick-add and check study answers.
 All controls also work without JavaScript using their buttons. The visual design and base stylesheet come from the
 sibling `cgi` app; its MIT notice is preserved in `fcard/static/CGI-LICENSE.txt`.
@@ -30,9 +31,11 @@ file is written. Database initialization is transactional and safe for simultane
 worker startup. Unknown schema versions are rejected; there is no destructive reset
 command.
 
-The current schema is version 2 and requires a fresh database. No migration or URL
-compatibility layer for version 1 is included. If you have an earlier database, keep it
-as a backup and point `FCARD_DATABASE` to a new file rather than overwriting it.
+The current schema is version 2. Existing version-2 databases are reused in place;
+search adds no schema changes. Future schema changes must ship explicit, transactional
+migrations that preserve existing vocabulary, users, progress, and review history.
+Never reset or replace a populated database as part of an upgrade. Back up the database
+before migrations; versions without an implemented migration are rejected, not erased.
 
 For another database path:
 
@@ -131,6 +134,31 @@ vertically with a prominent divider. Each form's description occupies the adjace
 cell of the same row, including on mobile; long text wraps within its own cell.
 The UI uses the same optional Google Font as `cgi`; if the font cannot be loaded, it
 falls back to monospace.
+
+## Word search
+
+Use the search box on the deck list or a deck page. Search covers all decks and every
+form on both sides, including noncanonical forms. Results show full cards with their
+deck link and edit button, and each matching card appears only once.
+
+Search is a literal substring match after English/German ASCII normalization:
+
+- Case, punctuation, symbols, and spaces are ignored.
+- `ä` / `ae` / `a`, `ö` / `oe` / `o`, and `ü` / `ue` / `u` match.
+- `ß` / `ẞ` / `ss` match; decomposed umlauts also work.
+- `buck`, `bueck`, and `BÜCK` all find `die, Bückerei?`.
+- Both full ASCII and digraph-folded spellings are checked, preserving ordinary
+  English/German substrings such as `ell` in `Duell`. These spelling equivalences
+  deliberately broaden search, so ordinary `ae` / `oe` / `ue` can also match
+  `a` / `o` / `u`.
+- Queries containing no supported letters or digits return no cards. There is no
+  general transliteration of other scripts. Query length is limited to 500 characters.
+
+Descriptions and metadata are not word forms and are not searched. Pagination keeps
+the query. Search reads existing form text directly (no schema migration or rebuilt
+index is needed), so edits and new cards are reflected immediately. No search-specific
+JavaScript is used. Stored spelling and answer grading are unchanged: search's looser
+matching is not used to decide whether a study answer is correct.
 
 ## Scheduling
 

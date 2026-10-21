@@ -6,6 +6,8 @@ import sqlite3
 
 from flask import current_app, g
 
+from .search import matches_search
+
 SCHEMA_VERSION = 2
 
 
@@ -14,6 +16,7 @@ def get_db():
         db = sqlite3.connect(current_app.config["DATABASE"], timeout=10)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")
+        db.create_function("word_matches", 2, matches_search, deterministic=True)
         g.db = db
     return g.db
 

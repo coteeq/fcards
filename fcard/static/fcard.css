@@ -62,6 +62,13 @@ header .tab, .user-menu > summary {
 .user-menu-panel button { display: block; width: 100%; text-align: left; }
 .user-menu-panel button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
 .user-menu-panel form + form { border-top: 1px solid var(--border); padding-top: 0.4rem; margin-top: 0.4rem; }
+.word-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  margin-bottom: var(--gap);
+}
+.word-search input[type=search] { margin: 0; }
 .quick-add { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
 .quick-add > div { flex: 1 1 10rem; min-width: 0; }
 .quick-add input:not([type=hidden]) { margin-bottom: 0; }

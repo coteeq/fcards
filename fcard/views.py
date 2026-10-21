@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 
 from .db import get_db, transaction
 from . import models, reviews
+from .search import search_keys
 
 bp = Blueprint("web", __name__)
 
@@ -142,6 +143,22 @@ def index():
         (g.user["id"],),
     ).fetchall()
     return render_template("index.html", decks=decks)
+
+
+@bp.get("/search")
+@login_required
+def search():
+    query = request.args.get("q", "")
+    if len(query) > 500:
+        abort(400, "Search text must be at most 500 characters.")
+    page = page_number()
+    searchable = bool(search_keys(query)[0])
+    cards, more = models.search_cards(query, g.user["id"], page) if searchable else ([], False)
+    forms = models.forms_for_cards([card["id"] for card in cards])
+    return render_template(
+        "search.html", query=query, searchable=searchable, cards=cards,
+        forms=forms, page=page, more=more,
+    )
 
 
 @bp.route("/new-deck", methods=("GET", "POST"))

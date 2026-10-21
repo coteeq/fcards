@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 from pathlib import Path
+from html import unescape
 import sqlite3
 import tempfile
 import unittest
@@ -792,6 +793,129 @@ class AppTest(unittest.TestCase):
         self.assertIn('aria-hidden="true"', heading)
         self.assertEqual(html.count(f'href="{self.edit_url}"'), 1)
         self.assertNotIn(">Edit card</a>", html)
+
+    def search_result_ids(self, query, page=1):
+        response = self.client.get("/search", query_string={"q": query, "page": page})
+        self.assertEqual(response.status_code, 200)
+        ids = [int(value) for value in re.findall(
+            r'<section class="card" id="card-(\d+)">', response.get_data(as_text=True),
+        )]
+        return ids, response
+
+    def test_search_covers_every_form_on_both_sides_and_all_decks(self):
+        with self.app.app_context():
+            other = create_deck("Other", "", self.alice)
+            card_id = create_card(other, {
+                "front": [("arbeiten", ""), ("gearbeitet", "past")],
+                "back": [("work", ""), ("worked", "past")],
+            }, "secretmetadata")
+        for query in ("ARBEITEN", "gearbeitet", "work", "worked"):
+            ids, response = self.search_result_ids(query)
+            self.assertEqual(ids, [card_id])
+            self.assertIn(b'href="/decks/Other"', response.data)
+            self.assertIn(f'/decks/Other/cards/{card_id}/edit'.encode(), response.data)
+        ids, _ = self.search_result_ids("Brote")
+        self.assertEqual(ids, [self.card_id])
+        ids, _ = self.search_result_ids("bread")
+        self.assertEqual(ids, [self.card_id])
+        for query in ("plural", "secretmetadata", "breadBrot"):
+            self.assertEqual(self.search_result_ids(query)[0], [])
+
+    def test_search_handles_umlauts_transliterations_and_punctuation(self):
+        with self.app.app_context():
+            card_id = create_card(self.deck_name, {
+                "front": [("die, Bückerei?", "")],
+                "back": [("bakehouse", "")],
+            }, "")
+        for query in ("buck", "bück", "bueck", "BÜCK", "b.u-c k"):
+            self.assertEqual(self.search_result_ids(query)[0], [card_id])
+
+    def test_search_returns_each_card_once_and_keeps_own_progress(self):
+        self.start()
+        self.answer("bread")
+        self.finish()
+        ids, response = self.search_result_ids("brot")
+        self.assertEqual(ids, [self.card_id])
+        self.assertIn(b"1/3 questions seen", response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM progress")), 1)
+        bob = self.app.test_client()
+        self.login("Bob", bob)
+        response = bob.get("/search", query_string={"q": "brot"})
+        self.assertIn(b"0/3 questions seen", response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM progress")), 1)
+
+    def test_search_pagination_preserves_query(self):
+        with self.app.app_context():
+            for i in range(22):
+                create_card(self.deck_name, {
+                    "front": [(f"Bückerei {i}", "")], "back": [("bakery", "")],
+                }, "")
+        query = "BÜC-K!"
+        first, response = self.search_result_ids(query)
+        self.assertEqual(len(first), 20)
+        html = unescape(response.get_data(as_text=True))
+        links = re.findall(r'href="([^"]+)"', html)
+        next_link = next(link for link in links if "page=2" in link)
+        next_response = self.client.get(next_link)
+        self.assertEqual(next_response.status_code, 200)
+        second = [int(value) for value in re.findall(
+            r'id="card-(\d+)"', next_response.get_data(as_text=True),
+        )]
+        self.assertEqual(len(second), 2)
+        self.assertFalse(set(first) & set(second))
+        self.assertIn('value="BÜC-K!"', next_response.get_data(as_text=True))
+
+    def test_search_empty_limits_and_no_sql_or_html_injection(self):
+        for query in ("", "!!!", "_%", "中文", "no-such-word"):
+            self.assertEqual(self.search_result_ids(query)[0], [])
+        ids, response = self.search_result_ids('<script>alert("x")</script>')
+        self.assertEqual(ids, [])
+        self.assertNotIn(b"<script", response.data)
+        self.assertIn(b"&lt;script&gt;", response.data)
+        self.assertEqual(self.search_result_ids("' OR 1=1 --")[0], [])
+        self.assertEqual(self.client.get("/search", query_string={"q": "x" * 501}).status_code, 400)
+        self.assertEqual(self.client.get("/search?q=brot&page=bad").status_code, 400)
+        self.assertEqual(self.app.test_client().get("/search?q=brot").status_code, 302)
+
+    def test_search_forms_are_get_requests_and_do_not_change_pending_review(self):
+        self.start()
+        self.answer("bread")
+        pending = self.pending()
+        for path in ("/", f"/decks/{self.deck_name}", "/search"):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn('class="word-search" method="get" action="/search"', html)
+        self.search_result_ids("brot")
+        self.assertEqual(self.pending(), pending)
+        self.assertEqual(self.rows("SELECT * FROM review_log"), [])
+
+    def test_search_uses_current_text_after_edit(self):
+        self.assertEqual(self.search_result_ids("brot")[0], [self.card_id])
+        self.post(self.edit_url, self.edit_payload(
+            front_text=["Haus"], front_description=[""],
+        ))
+        self.assertEqual(self.search_result_ids("brot")[0], [])
+        self.assertEqual(self.search_result_ids("haus")[0], [self.card_id])
+
+    def test_search_on_reopened_populated_database_preserves_schema_and_data(self):
+        with self.app.app_context():
+            db = get_db()
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            schema = db.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall()
+            before = [tuple(row) for row in schema]
+            forms = [tuple(row) for row in db.execute("SELECT * FROM card_forms")]
+        reopened = create_app({
+            "TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test",
+        })
+        with reopened.app_context():
+            db = get_db()
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], version)
+            self.assertEqual([tuple(r) for r in db.execute(
+                "SELECT sql FROM sqlite_master ORDER BY name"
+            )], before)
+            self.assertEqual([tuple(r) for r in db.execute("SELECT * FROM card_forms")], forms)
+            self.assertEqual(db.execute(
+                "SELECT word_matches(text, 'BROT') FROM card_forms WHERE text='Brot'"
+            ).fetchone()[0], 1)
 
     def test_reinitialization_versions_and_constraints(self):
         new_app = create_app({"TESTING": True, "DATABASE": self.database, "SECRET_KEY": "test"})
