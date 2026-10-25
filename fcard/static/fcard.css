@@ -197,14 +197,43 @@ summary { cursor: pointer; color: var(--text-muted); }
 .tab-toolbar { align-items: center; }
 .study-leave { margin-top: var(--gap); }
 .lesson-sync { min-height: 2.5em; margin-bottom: 0.75rem; }
-[data-lesson-stage] { border: 1px solid var(--border); border-radius: var(--radius); }
+[data-lesson-stage] {
+  --lesson-correct-bg: #20ff2020;
+  --lesson-incorrect-bg: #ff202020;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-lesson-stage][data-verdict=correct] { background: var(--lesson-correct-bg); }
+[data-lesson-stage][data-verdict=incorrect] { background: var(--lesson-incorrect-bg); }
+[data-lesson-stage][data-verdict] .card,
+[data-lesson-stage][data-verdict] .card-header { background: transparent; }
 [data-lesson-stage]:empty { display: none; }
 [data-lesson-stage] > button { margin: 1rem; }
 .lesson-list { list-style: none; }
 .lesson-list li + li { margin-top: 0.75rem; }
 .lesson-list small { display: block; }
-.lesson-results { padding: 1rem 1rem 1rem 2.5rem; }
-.lesson-results li + li { margin-top: 0.35rem; }
+.lesson-complete-heading h3 { margin-bottom: 0.5rem; }
+.lesson-results-wrap { margin: 0 1rem 1rem; overflow-x: auto; }
+.lesson-results { width: 100%; min-width: 32rem; table-layout: fixed; border-collapse: collapse; font-size: 0.85rem; }
+.lesson-results th, .lesson-results td { padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.lesson-results thead th { color: var(--text-muted); font-weight: 600; }
+.lesson-results th:first-child { width: 2.8rem; }
+.lesson-results thead th:nth-child(2) { width: 3.8rem; }
+.lesson-result-status { font-weight: 600; white-space: nowrap; }
+.lesson-result[data-verdict=correct] { background: var(--lesson-correct-bg); }
+.lesson-result[data-verdict=incorrect] { background: var(--lesson-incorrect-bg); }
+.lesson-actions { padding: 1rem; }
+.lesson-retype p { margin-bottom: 0.75rem; }
+.lesson-retype textarea[aria-invalid=true] { border-color: #b65050; }
+.lesson-retype[data-shake=true] { animation: lesson-shake 0.28s ease-in-out; }
+@keyframes lesson-shake {
+  0%, 100% { transform: translateX(0); }
+  25%, 75% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lesson-retype[data-shake=true] { animation: none; }
+}
 summary.card-header { color: var(--text-muted); }
 @media (prefers-color-scheme: dark) {
   :root[data-theme=system] .error { color: #ff8866; background: #2a1a14; border-color: #5a2a1a; }

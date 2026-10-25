@@ -66,9 +66,12 @@
 - `state_json` is exactly `{cursor, ratings}`. Cursor is 0–19. Ratings form a contiguous
   answered prefix of length `cursor` (current question unanswered) or `cursor + 1`
   (current verdict revealed). Each entry contains only final `rating` and nullable
-  scheduler `control`, validated against its item's snapshotted options.
+  scheduler `control`, validated against its item's snapshotted options. The cursor
+  represents furthest lesson progress; viewing an earlier question does not rewind it.
 - Raw submitted answers, automatic verdicts, correction flags, and correction history
-  never persist. Answer checking uses NFC and Unicode casefold, plus `ü` → `ue`.
+  never persist in the database. Original answers and retype acknowledgements can live
+  in a separate browser-local cache, not the lesson sync payload or scheduling state.
+  Answer checking uses NFC and Unicode casefold, plus `ü` → `ue`.
   Thus `ß/ss` and `ü/ue` match; plain `u` does not match `ü`. Spaces, punctuation,
   and other accents stay significant. Matching uses original expected text, not the
   snapshot's legacy casefold key, so saved lessons use the current rules unchanged.
@@ -77,7 +80,9 @@
 - Async sync changes only lesson state/revision/time, never scheduling progress. Writers
   compare the lesson revision under an immediate transaction. An identical retried state
   is idempotent; a stale revision with different state is rejected, not overwritten.
-  Browser recovery retains pending final choices, not raw answers or original verdicts.
+  The sync outbox retains only pending final choices. A separate local answer cache
+  supports original-mistake review and is not deleted when the lesson completes.
+  If unavailable, the database cannot reconstruct original answers or corrections.
 - Incomplete lessons are queryable by user, including all-answered lessons not yet
   ended.
   They survive logout, session expiration, and server restart. Completed lessons remain

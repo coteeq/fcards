@@ -475,6 +475,9 @@ def lesson_result(lesson_id, finishing=None):
     try:
         if finishing is None:
             data = lessons.load(str(lesson_id), g.user["id"])
+            for question in data["questions"]:
+                question["edit_url"] = url_for("web.edit_card", deck_name=data["deck_name"],
+                                               card_id=question["card_id"])
         else:
             data = lessons.save(str(lesson_id), g.user["id"], request.get_json(silent=True),
                                 current_app.config["SCHEDULERS"], int(time.time()), finishing)

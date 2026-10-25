@@ -56,6 +56,17 @@ class LessonTest(unittest.TestCase):
         self.assertIn("data-lesson-stage", html)
         self.assertIn("noscript", html)
 
+    def test_question_edit_links_work_for_existing_saved_snapshots(self):
+        lesson_id, data = self.create()
+        for question in data["questions"]:
+            expected = f"/decks/{self.deck_name}/cards/{question['card_id']}/edit"
+            self.assertEqual(question["edit_url"], expected)
+        self.assertEqual(self.client.get(data["questions"][0]["edit_url"]).status_code, 200)
+        snapshots = self.rows("SELECT snapshot_json FROM lesson_items WHERE lesson_id=?", (lesson_id,))
+        self.assertTrue(all("edit_url" not in json.loads(row["snapshot_json"]) for row in snapshots))
+        self.assertEqual(self.client.get("/api/lessons/" + lesson_id).get_json()["questions"],
+                         data["questions"])
+
     def test_twenty_distinct_questions_when_pool_is_large_enough(self):
         with self.app.app_context():
             for i in range(12):

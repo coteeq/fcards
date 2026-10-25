@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId = '', classification = null } = {}) {
+function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId = '', classification = null, hash = '', savedEntries = [] } = {}) {
   let focused;
   class Element {
     constructor(tag, attrs = {}) {
@@ -59,6 +59,7 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
     closest(selector) { return this.matches(selector) ? this : this.parentNode?.closest(selector) || null; }
     contains(node) { return this === node || this.children.some((c) => c.contains(node)); }
     focus() { focused = this; }
+    requestSubmit() { this.emit('submit'); }
     cloneNode(deep) {
       const node = new Element(this.tag, Object.fromEntries(this.attributes));
       for (const key of ['value', 'name', 'id', 'required', 'disabled', 'type', 'className', 'formNoValidate', 'text']) {
@@ -156,10 +157,32 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
   doc.append(form, panel);
   let timerId = 0;
   const timers = new Map(), requests = [];
-  const saved = new Map();
+  const saved = new Map(savedEntries);
+  const events = new Map();
+  const location = { hash, reload() {} };
+  const stack = [hash];
+  let position = 0;
+  const emitWindow = (type) => { for (const listener of events.get(type) || []) listener({ type }); };
+  const history = {
+    get length() { return stack.length; },
+    replaceState(_, __, url) { location.hash = url; stack[position] = url; },
+    pushState(_, __, url) {
+      stack.splice(position + 1); stack.push(url); position++; location.hash = url;
+    },
+    go(delta) {
+      const next = position + delta;
+      if (next < 0 || next >= stack.length) return;
+      position = next; location.hash = stack[position]; emitWindow('popstate'); emitWindow('hashchange');
+    },
+    back() { this.go(-1); }, forward() { this.go(1); },
+  };
+  const browser = {
+    history, location,
+    addEventListener(type, listener) { if (!events.has(type)) events.set(type, []); events.get(type).push(listener); },
+  };
   const context = vm.createContext({
     document: doc, AbortController,
-    window: { addEventListener() {} }, location: { reload() {} },
+    window: browser, location, history,
     localStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value), removeItem: (key) => saved.delete(key) },
     Event: class { constructor(type) { this.type = type; } },
     setTimeout(callback) { timers.set(++timerId, callback); return timerId; },
@@ -167,7 +190,8 @@ function fixture({ quick = false, front = [['', '']], back = [['', '']], cardId 
     fetch(url, options) { return new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })); },
   });
   return {
-    doc, form, panel, status, list, meta, timers, requests, choices, saved,
+    doc, form, panel, status, list, meta, timers, requests, choices, saved, history, location,
+    navigate(hash) { history.pushState(null, '', hash); emitWindow('hashchange'); },
     get focused() { return focused; },
     rows: (side) => [...form.querySelector(`[data-form-rows="${side}"]`).children],
     load(script) { vm.runInContext(fs.readFileSync(path.join(__dirname, '../fcard/static', script), 'utf8'), context); },

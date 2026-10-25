@@ -188,9 +188,33 @@ rules without migrating or rewriting their snapshots.
 No network request is required to check or advance.
 
 Cursor and **final** rating/adjustment choices sync asynchronously. Raw answers,
-automatic verdicts, and whether a verdict was corrected are never sent or persisted.
-After a reload, the revealed answer/final choice can be restored, but not the original
-typed answer or automatic verdict. Corrections have no separate audit trail.
+automatic verdicts, and whether a verdict was corrected are never sent to or stored by
+the server. A separate **browser-local** cache retains original answers and retype
+acknowledgements, including after completion, so reloads and the final review can show
+mistakes. Clearing this site's browser data removes that cache. On another device (or
+when no local cache is available), original answers are marked unavailable rather than
+invented. Corrections have no separate server audit trail.
+
+Each question has a stable fragment URL such as `/lessons/<uuid>#question=3`.
+Checking replaces the question's view with its verdict without adding a history entry;
+advancing adds the next question. Browser Back/Forward therefore revisits earlier
+verdicts, including after completion, without regrading, rewinding saved progress, or
+applying schedules again. Past questions are review-only. `#complete` opens the final
+review once the lesson is completed.
+
+A final incorrect verdict requires retyping the correct answer before advancing.
+Retyping uses the same matcher (including `ß/ss` and `ü/ue`); mismatches show feedback
+and a short shake instead of advancing. Reduced-motion preferences disable the shake.
+Enter submits; Shift+Enter keeps a newline and IME composition is left alone.
+**Skip retype** explicitly bypasses this exercise, without changing the incorrect
+rating. The same rule applies on the last question before End lesson. Changing the
+verdict to correct removes the retype requirement.
+
+The compact completion table shows each prompt, correct answer, and an **OK/NOK**
+result column. Rows use the same muted green/red backgrounds as lesson verdicts.
+Incorrect rows also show the original mistake, never the later retype. Number links
+return to each saved verdict. The table scrolls horizontally on narrow screens. Completing the lesson does not erase the local
+answer cache; it only clears the scheduling-sync outbox.
 
 Writes are serialized in the browser and revision-checked on the server. A small local
 storage outbox recovers unsynced choices after navigation; network failures retry with
@@ -204,6 +228,9 @@ marker commit in one transaction. Completion is idempotent, including retries an
 concurrent requests. Failed completion applies nothing. Separate lessons apply to the
 latest scheduling state; repeated appearances each count as a review. During a pending
 end request the last screen is locked, and failed requests can safely retry.
+
+Each verdict has an **Edit card** button opening the original card in a new tab,
+without leaving the lesson. Editing does not rewrite that lesson's saved wording.
 
 Lesson wording/answers are immutable snapshots. Later card edits do not change an
 existing lesson; changed/deleted source questions are skipped when applying schedules,

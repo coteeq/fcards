@@ -1,5 +1,6 @@
-// Only final ratings/cursor cross the network. Raw answers and automatic verdicts
-// remain in the view's memory. One in-flight write, optimistic revisions, durable outbox.
+// Only final ratings/cursor cross the network. Original answers stay in a separate
+// browser-only cache; neither they nor retype/correction history enter this outbox.
+// One in-flight write, optimistic revisions, durable outbox.
 class LessonSync {
   static same(a, b) {
     return a.cursor === b.cursor && a.ratings.length === b.ratings.length
