@@ -58,8 +58,10 @@
   avoid immediate repeats when an alternative exists. Mixed algorithms rotate groups.
 - Selection, order, algorithm, and snapshots persist in one transaction. A snapshot
   contains original question/card IDs and card revision, kind, label, prompt, expected
-  answer and its Unicode-casefold key, both sides/forms/descriptions, metadata, rating
-  choices/defaults, and scheduler controls. Questions and answers load together once.
+  answer and its Unicode-casefold key, both sides/forms/descriptions, metadata, word
+  type, rating choices/defaults, and scheduler controls. Questions and answers load
+  together once. Legacy snapshots missing word type may read it from an unchanged
+  source card; edited or deleted sources leave the old type unknown.
 - Snapshots are immutable, including after vocabulary edits. Deleting a source question
   sets the item's live FK to NULL, not deleting the lesson. Snapshots retain original
   identity/text independently. A newly created question does not replace an old slot.
@@ -75,6 +77,9 @@
   Thus `ß/ss` and `ü/ue` match; plain `u` does not match `ü`. Spaces, punctuation,
   and other accents stay significant. Matching uses original expected text, not the
   snapshot's legacy casefold key, so saved lessons use the current rules unchanged.
+  For `back_to_front` questions whose snapshotted word type is `verb`, one leading
+  English `to ` is optional on both expected and submitted text. Other directions,
+  metadata questions, and non-verb or unknown types do not receive this equivalence.
   Gender choices submit an article.
   Both automatic and manually corrected choices become indistinguishable final ratings.
 - Async sync changes only lesson state/revision/time, never scheduling progress. Writers

@@ -274,4 +274,36 @@ async function test(name, run) { await run(); console.log('ok:', name); }
     assert.equal(s.requests.length, 1);
     assert.match(s.stage.textContent, /keeps its saved wording/);
   });
+  await test('German to English verbs accept optional to for checking and retyping', async () => {
+    const questions = Array.from({ length: 20 }, () => question({
+      kind: 'back_to_front', word_type: 'verb', prompt: 'gehen', expected: 'to go',
+    }));
+    const s = await setup({ questions });
+    assert.match(s.stage.textContent, /prefix is optional/);
+    let form = s.stage.querySelector('form'); form.querySelector('textarea').value = 'go'; form.emit('submit');
+    assert.equal(s.stage.attributes.get('data-verdict'), 'correct');
+    assert.match(s.stage.textContent, /Automatic verdict: correct/);
+    s.stage.querySelectorAll('button').find((b) => b.textContent.includes('Next question')).emit('click');
+    form = s.stage.querySelector('form'); form.querySelector('textarea').value = 'went'; form.emit('submit');
+    form = s.stage.querySelector('.lesson-retype'); form.querySelector('textarea').value = 'GO'; form.emit('submit');
+    assert.equal(s.location.hash, '#question=3');
+    const pending = JSON.parse(s.saved.get('fcard.lesson.uuid'));
+    assert.equal(pending.state.ratings[1].rating, 'incorrect');
+    s.history.back(); s.history.back();
+    assert.match(s.stage.textContent, /Automatic verdict: correct/);
+  });
+  await test('optional to is not applied to other types, unknown types, or other directions', async () => {
+    for (const context of [
+      { kind: 'back_to_front', word_type: 'noun' },
+      { kind: 'back_to_front', word_type: null },
+      { kind: 'front_to_back', word_type: 'verb' },
+      { kind: 'meta', word_type: 'verb' },
+    ]) {
+      const s = await setup({ questions: Array.from({ length: 20 }, () => question({ ...context, expected: 'to go' })) });
+      assert.doesNotMatch(s.stage.textContent, /prefix is optional/);
+      const form = s.stage.querySelector('form'); form.querySelector('textarea').value = 'go'; form.emit('submit');
+      assert.equal(s.stage.attributes.get('data-verdict'), 'incorrect');
+      assert.ok(s.stage.querySelector('.lesson-retype'));
+    }
+  });
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -185,6 +185,12 @@ normalized with NFC, and `ü`/`ue` are equivalent (including uppercase). Plain `
 not match `ü` or `ue`. Other accents, whitespace, and punctuation remain significant.
 The matcher normalizes the original expected text, so saved lessons also receive these
 rules without migrating or rewriting their snapshots.
+For **German → English verb** questions only, a leading English `to ` is optional:
+`go` and `to go` both match, case-insensitively. The card must be classified as a verb;
+other types, unknown types, English → German questions, and metadata questions remain
+strict about that prefix. The same rule applies to retyping after an incorrect answer.
+New lessons snapshot the word type. Older lessons can recover it from an unchanged
+source card; if that card was edited or deleted, its old unknown type stays strict.
 No network request is required to check or advance.
 
 Cursor and **final** rating/adjustment choices sync asynchronously. Raw answers,

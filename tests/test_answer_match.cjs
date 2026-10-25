@@ -9,7 +9,7 @@ for (const script of ['casefold.js', 'answer-match.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../fcard/static', script), 'utf8'), context);
 }
 const matches = vm.runInContext('fcardAnswersMatch', context);
-for (const [answer, expected, accepted] of cases) {
-  assert.equal(matches(answer, expected), accepted, `${JSON.stringify(answer)} vs ${JSON.stringify(expected)}`);
+for (const [answer, expected, accepted, question = {}] of cases) {
+  assert.equal(matches(answer, expected, question), accepted, `${JSON.stringify(answer)} vs ${JSON.stringify(expected)} (${JSON.stringify(question)})`);
 }
-console.log(`ok: ${cases.length} shared German/Unicode answer cases; plain u never substitutes for ü`);
+console.log(`ok: ${cases.length} shared spelling/context cases; optional to only for German → English verbs`);

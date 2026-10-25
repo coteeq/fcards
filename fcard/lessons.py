@@ -41,7 +41,21 @@ def items(lesson_id):
 
 def load(lesson_id, user_id):
     row = owned(lesson_id, user_id)
-    return status(row) | {"questions": [json.loads(item["snapshot_json"]) for item in items(lesson_id)]}
+    questions = [json.loads(item["snapshot_json"]) for item in items(lesson_id)]
+    # Older snapshots predate the type hint. Recover it only from an unchanged
+    # source card; never reinterpret a snapshot using a later edited classification.
+    if any("word_type" not in q for q in questions):
+        ids = list({q["card_id"] for q in questions})
+        placeholders = ",".join("?" for _ in ids)
+        cards = {c["id"]: c for c in get_db().execute(
+            f"SELECT id, revision, word_type FROM cards WHERE id IN ({placeholders})", ids,
+        )}
+        for question in questions:
+            if "word_type" not in question:
+                card = cards.get(question["card_id"])
+                question["word_type"] = (card["word_type"] if card is not None
+                                         and card["revision"] == question["card_revision"] else None)
+    return status(row) | {"questions": questions}
 
 
 def unfinished(user_id):
@@ -77,6 +91,7 @@ def create(deck_name, user_id, default_algorithm, registry, now):
             snapshot = {
                 "question_id": candidate.question_id, "card_id": data["question"]["card_id"],
                 "card_revision": data["question"]["card_revision"], "kind": data["question"]["kind"],
+                "word_type": data["question"]["word_type"],
                 "label": data["label"], "prompt": data["prompt"], "expected": data["expected"],
                 "expected_key": data["expected"].casefold(), "meta": data["question"]["meta"],
                 "forms": {side: [{"text": f["text"], "description": f["description"]} for f in forms]

@@ -169,6 +169,9 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
         input.autocomplete = 'off'; input.spellcheck = false;
         form.append(label, input); keyboardSubmit(form, input);
       }
+      if (question.kind === 'back_to_front' && question.word_type === 'verb') {
+        form.append(node('p', 'muted', 'For this English verb answer, the “to” prefix is optional.'));
+      }
       const check = node('button', 'primary', 'Check answer');
       form.append(node('p', 'muted', question.kind === 'gender'
         ? 'Choose a gender, then check. Enter checks; arrow keys change the selection. Empty answers count as incorrect.'
@@ -177,7 +180,7 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
         event.preventDefault();
         if (sync.blocked || endRequested || !active || ratings.length !== cursor) return;
         const answer = question.kind === 'gender' ? [...form.querySelectorAll('input')].find((i) => i.checked)?.value || '' : input.value;
-        const auto = fcardAnswersMatch(answer, question.expected) ? 'correct' : 'incorrect';
+        const auto = fcardAnswersMatch(answer, question.expected, question) ? 'correct' : 'incorrect';
         remember(cursor, { answer, retypeDone: false });
         ratings.push({ rating: question.defaults[auto], control: null });
         sync.changed(); render(); // Same history entry now represents the verdict.
@@ -189,7 +192,7 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
     const memory = attempts.get(cursor);
     const original = memory?.answer;
     body.append(node('p', '', original !== undefined
-      ? `Automatic verdict: ${fcardAnswersMatch(original, question.expected) ? 'correct' : 'incorrect'}`
+      ? `Automatic verdict: ${fcardAnswersMatch(original, question.expected, question) ? 'correct' : 'incorrect'}`
       : 'Saved verdict (the original answer is unavailable on this device).'));
     body.append(node('p', 'text', `Your answer: ${original === undefined ? '(unavailable on this device)' : original || '(empty)'}`));
     body.append(node('p', 'text', 'Expected answer: ' + question.expected));
@@ -258,7 +261,7 @@ document.querySelectorAll('[data-lesson]').forEach(async (root) => {
         form.addEventListener('submit', (event) => {
           event.preventDefault();
           if (sync.blocked || endRequested) return;
-          if (!fcardAnswersMatch(input.value, question.expected)) {
+          if (!fcardAnswersMatch(input.value, question.expected, question)) {
             input.setAttribute('aria-invalid', 'true');
             feedback.textContent = 'Not quite — retype the correct answer shown above, or choose Skip retype.';
             form.removeAttribute('data-shake'); void form.offsetWidth; form.setAttribute('data-shake', 'true');

@@ -221,7 +221,7 @@ def forms_for_cards(card_ids):
 
 def question_data(question_id, deck_name):
     question = get_db().execute(
-        """SELECT q.*, c.meta, c.gender, c.revision AS card_revision FROM questions q
+        """SELECT q.*, c.meta, c.gender, c.word_type, c.revision AS card_revision FROM questions q
            JOIN cards c ON c.id = q.card_id WHERE q.id = ? AND c.deck_name = ?""",
         (question_id, deck_name),
     ).fetchone()

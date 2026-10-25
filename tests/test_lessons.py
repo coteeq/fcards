@@ -67,6 +67,40 @@ class LessonTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/lessons/" + lesson_id).get_json()["questions"],
                          data["questions"])
 
+    def test_verb_type_is_snapshotted_and_not_changed_by_later_edits(self):
+        forms = {"front": [("to go", "")], "back": [("gehen", "")]}
+        with self.app.app_context():
+            card_id = create_card(self.deck_name, forms, "", word_type="verb")
+        lesson_id, data = self.create()
+        questions = [q for q in data["questions"] if q["card_id"] == card_id]
+        self.assertTrue(questions)
+        self.assertTrue(all(q["word_type"] == "verb" for q in questions))
+        with self.app.app_context():
+            update_card(self.deck_name, card_id, forms, "", 0, word_type="noun")
+        self.assertEqual(self.client.get("/api/lessons/" + lesson_id).get_json()["questions"],
+                         data["questions"])
+
+    def test_legacy_snapshots_recover_type_only_from_unchanged_source_cards(self):
+        forms = {"front": [("to go", "")], "back": [("gehen", "")]}
+        with self.app.app_context():
+            card_id = create_card(self.deck_name, forms, "", word_type="verb")
+        lesson_id, _ = self.create()
+        with self.app.app_context(), transaction(get_db()) as db:
+            db.execute("UPDATE lesson_items SET snapshot_json=json_remove(snapshot_json, '$.word_type') "
+                       "WHERE lesson_id=?", (lesson_id,))
+        saved = self.rows("SELECT snapshot_json FROM lesson_items WHERE lesson_id=?", (lesson_id,))
+        loaded = self.client.get("/api/lessons/" + lesson_id).get_json()
+        questions = [q for q in loaded["questions"] if q["card_id"] == card_id]
+        self.assertTrue(questions)
+        self.assertTrue(all(q["word_type"] == "verb" for q in questions))
+        self.assertEqual(self.rows("SELECT snapshot_json FROM lesson_items WHERE lesson_id=?", (lesson_id,)),
+                         saved)
+        with self.app.app_context():
+            update_card(self.deck_name, card_id, forms, "", 0, word_type="noun")
+        loaded = self.client.get("/api/lessons/" + lesson_id).get_json()
+        self.assertTrue(all(q["word_type"] is None for q in loaded["questions"]
+                            if q["card_id"] == card_id))
+
     def test_twenty_distinct_questions_when_pool_is_large_enough(self):
         with self.app.app_context():
             for i in range(12):

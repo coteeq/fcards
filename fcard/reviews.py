@@ -7,13 +7,17 @@ from .db import get_db
 from .schedulers import Candidate
 
 
-def answer_key(text):
-    """German answer spelling equivalences; deliberately stricter than search."""
-    return unicodedata.normalize("NFC", text).casefold().replace("ü", "ue")
+def answer_key(text, *, kind=None, word_type=None):
+    """Spelling equivalences and optional English infinitive marker for verb answers."""
+    key = unicodedata.normalize("NFC", text).casefold().replace("ü", "ue")
+    if kind == "back_to_front" and word_type == "verb":
+        key = key.removeprefix("to ")
+    return key
 
 
-def verdict(answer, expected):
-    return "correct" if answer_key(answer) == answer_key(expected) else "incorrect"
+def verdict(answer, expected, *, kind=None, word_type=None):
+    context = {"kind": kind, "word_type": word_type}
+    return "correct" if answer_key(answer, **context) == answer_key(expected, **context) else "incorrect"
 
 
 def candidates(deck_name, user_id, default_algorithm):
